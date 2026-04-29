@@ -1,0 +1,57 @@
+services:
+  kiku-alpha:
+    build: .
+    env_file:
+      - configs/env/common.env
+      - configs/env/kiku.env
+    environment:
+      - RUNNING_IN_CONTAINER=true
+#      - DEBUG_ANTHROPIC_REQUEST=1
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "mail-agents.mxhero.com:host-gateway" # for local development
+    volumes:
+      - ./data/kiku:/app/data
+
+#  kiku-beta:
+#    build: .
+#    env_file:
+#      - configs/env/common.env
+#      - configs/env/beta.env
+#    environment:
+#      - RUNNING_IN_CONTAINER=true
+#    restart: unless-stopped
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
+#      - "mail-agents.mxhero.com:host-gateway" # for local development
+#    volumes:
+#      - ./data/beta:/app/data
+#
+#  kiku-gamma:
+#    build: .
+#    env_file:
+#      - configs/env/common.env
+#      - configs/env/gamma.env
+#    environment:
+#      - RUNNING_IN_CONTAINER=true
+#    restart: unless-stopped
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
+#      - "mail-agents.mxhero.com:host-gateway" # for local development
+#    volumes:
+#      - ./data/gamma:/app/data
+#
+#  kiku-delta:
+#    build: .
+#    env_file:
+#      - configs/env/common.env
+#      - configs/env/delta.env
+#    environment:
+#      - RUNNING_IN_CONTAINER=true
+#    restart: unless-stopped
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
+#      - "mail-agents.mxhero.com:host-gateway" # for local development
+#    volumes:
+#      - ./data/delta:/app/data

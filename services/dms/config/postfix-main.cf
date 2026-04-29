@@ -1,0 +1,7 @@
+mynetworks = 127.0.0.0/8 [::1]/128 172.16.0.0/12 192.168.0.0/16 10.0.0.0/8
+
+# Restrict DELIVERY to the following domains
+transport_maps = texthash:/tmp/docker-mailserver/postfix-transport.cf
+
+# Restrict RECEIVING to the following domains
+smtpd_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/postfix-sender-access.cf, reject

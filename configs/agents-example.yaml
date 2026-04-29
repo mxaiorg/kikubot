@@ -1,0 +1,28 @@
+# Example agents.yaml
+# This file defines agents and their associated scripts for the Kikubot platform.
+# It is used to inform an agent of the scripts they use and of other agents they can interact with.
+# Tools are defined in internal/scripts/registry.go
+agents:
+  - name: Kiku
+    email: kiku@agents.example.com
+    role: "Coordinator (she, her)"
+    description: "Communicates with users. Manages tasks and resources. Coordinates other agents."
+    tools: [report, snooze, unsnooze]
+
+  - name: Beta
+    email: beta@agents.example.com
+    role: "CRM, Email Archivist (he, him)"
+    description: "Manages Salesforce and access to the company email record"
+    tools: [mxmcp, salesforce_mcp]
+
+  - name: Gamma
+    email: gamma@agents.example.com
+    role: "Social Media, Web Searcher (she, her)"
+    description: "Creates and posts social media posts in draft form. Searches the web for relevant content."
+    tools: [buffer_mcp, anthropic_web_search]
+
+  - name: Delta
+    email: delta@agents.example.com
+    role: "Webmaster, Web Searcher, Knowledge Base (FAQ) Maintainer, File Manager (he, him)"
+    description: "Updates the company website. Answers and updates questions about mxHERO. Retrieves company files. Downloads URLs. Converts files to text."
+    tools: [wordpress, tavily_mcp, helpjuice, box_cli, download, file_text]

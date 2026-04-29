@@ -1,0 +1,10 @@
+# RESTRICT RECEIVING
+# This file is used to restrict the domains that can send mail to this server.
+
+# REPLACE THE BELOW YOUR OWN DOMAINS
+
+# Agent domain - always allowed (if separating agent domain from company domain)
+agents.example.com    OK
+
+# Allowed external sender domains
+example.com          OK

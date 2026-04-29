@@ -1,0 +1,11 @@
+# RESTRICT SENDING TO EXTERNAL DOMAINS
+# REPLACE WITH YOUR OWN DOMAIN AND AGENT SUBDOMAIN
+
+# Own domain - deliver locally (if using an agent domain)
+agents.example.com    lmtp:unix:/var/run/dovecot/lmtp
+
+# Allowed external domains - deliver normally via DNS (e.g., company domain)
+example.com     smtp:
+
+# Reject everything else
+*              error:5.7.1 Sending to this domain is not permitted

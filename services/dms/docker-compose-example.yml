@@ -1,0 +1,42 @@
+services:
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    container_name: dms
+    restart: unless-stopped
+#    Change the hostname and domainname to match your case
+    hostname: mail-agents.example.com
+    domainname: agents.example.com
+
+    ports:
+      - "25:25"     # SMTP (plain + STARTTLS)
+      - "587:587"   # Submission (STARTTLS)
+      - "143:143"   # IMAP (plain + STARTTLS)
+      - "993:993"   # IMAPS (implicit TLS)
+    volumes:
+      - ./maildata:/var/mail
+      - mailstate:/var/mail-state
+      - ./config:/tmp/docker-mailserver
+      - ./certs:/tmp/dms/custom-certs:ro
+    environment:
+      - ENABLE_CLAMAV=0
+      - ENABLE_OPENDKIM=0
+      - ENABLE_OPENDMARC=0
+      - ENABLE_POLICYD_SPF=0
+      - ENABLE_AMAVIS=0
+      - ENABLE_SPAMASSASSIN=0
+# Uncomment the following to ENABLE anti-spam checks (for production)
+      - ENABLE_RSPAMD=1
+      - SPOOF_PROTECTION=1
+      - POSTSCREEN_ACTION=enforce
+# Uncomment the following to DISABLE SPF, DKIM, and DMARC checks (for local testing)
+#      - ENABLE_RSPAMD=0
+#      - SPOOF_PROTECTION=0
+#      - POSTSCREEN_ACTION=ignore
+      # BASIC AUTH
+      - ACCOUNT_PROVISIONER=FILE
+      - SSL_TYPE=manual
+      - SSL_CERT_PATH=/tmp/dms/custom-certs/fullchain.pem
+      - SSL_KEY_PATH=/tmp/dms/custom-certs/privkey.pem
+
+volumes:
+  mailstate:
