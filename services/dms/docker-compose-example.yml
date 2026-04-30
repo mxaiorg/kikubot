@@ -32,7 +32,7 @@ services:
 #      - ENABLE_RSPAMD=0
 #      - SPOOF_PROTECTION=0
 #      - POSTSCREEN_ACTION=ignore
-      # BASIC AUTH
+#     BASIC AUTH
       - ACCOUNT_PROVISIONER=FILE
       - SSL_TYPE=manual
       - SSL_CERT_PATH=/tmp/dms/custom-certs/fullchain.pem

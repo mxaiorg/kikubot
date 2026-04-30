@@ -66,7 +66,7 @@ Each agent container runs an identical Go binary, parameterised by environment v
 ## Quick start
 
 ```bash
-git clone https://github.com/mxhero/kikubot.git
+git clone https://github.com/mxaiorg/kikubot
 cd kikubot
 
 # 1. Configure the agent roster and per-agent env files (see "Configuration").
@@ -79,14 +79,22 @@ cp configs/env/examples/kiku.env   configs/env/kiku.env
 
 # 2. (Optional) Drop knowledge files into configs/knowledge/<agent>/*.md
 
+# 3. Edit the docker-compose.yml to match your environment.
+cp docker-compose.yml.example docker-compose.yml
+#    - Set the service (agent) names to reflect your agents.yaml.
+#    - Set the environment and volume mounts to match your agent specific env files
+#      and data folder
+
 # 3. Launch.
-docker compose up -d --build --remove-orphans
+docker compose up -d --build
 ```
 
 Send the agent an email from a whitelisted address and watch the reply land in your inbox.
 
+To watch the conversation between agents recorded in the logs:
+
 ```bash
-docker compose logs -f kiku-alpha
+docker compose logs -f
 ```
 
 ## Configuration
@@ -253,6 +261,10 @@ var registry = map[string]toolFactory{
 
 …and add `weather` to the `tools:` list of any agent in `configs/agents.yaml`.
 
+#### Environment variables for API keys
+If an API key is passed in via environment variables, be sure to update `internal/config/env_vars.go` and include the exported variable (`config.YouEnvVar`) in your tool code. Then of course, add the env var to the `env/` files.
+
+#### Injecting email context into the tool system prompt
 For per-email context (e.g. injecting the current date, or summarising thread state), set the `System func(email services.Email) (string, error)` field instead of `StaticSystem` — its output goes into the *volatile* portion of the system prompt and is not cached.
 
 ### Helpers for common patterns
@@ -291,6 +303,10 @@ Most integrations don't need a hand-written `Execute`. The `tools` package provi
   ```
 
 - **Hand-curated CLI wrappers** → [`CLIToolConfig`](internal/tools/cli_helper.go) is the same idea as `LocalMCPBridge` but for CLIs that don't speak MCP — you author the schemas yourself and the helper handles subprocess execution, JSON-flag injection, and root-path scoping.
+
+### More about tools
+
+Read more about tools in the [tools README](internal/tools/README.md)
 
 ## Recurring tasks
 

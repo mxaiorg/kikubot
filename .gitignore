@@ -18,3 +18,4 @@
 /services/dms/config/postfix-sender-access.cf
 /services/dms/config/postfix-transport.cf
 /memory/
+/docker-compose.yml
