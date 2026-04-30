@@ -19,9 +19,7 @@ Not a great solution since it requires a user to log in. But good for testing.
 */
 
 func XeroMCP() []ToolDefinition {
-	log.Println("CLIENT_ID: ", config.XeroClientId, " CLIENT_SECRET: ", config.XeroClientSecret)
-
-	config := LocalMCPConfig{
+	xeroConfig := LocalMCPConfig{
 		ServerName: "xero",
 		Command:    "npx",
 		Args:       []string{"-y", "@xeroapi/xero-mcp-server@latest"},
@@ -32,7 +30,7 @@ func XeroMCP() []ToolDefinition {
 		},
 	}
 
-	tools, err := LocalMCPBridge(config)
+	tools, err := LocalMCPBridge(xeroConfig)
 	if err != nil {
 		log.Println("error initializing Xero MCP bridge:", err)
 	} else {
