@@ -101,9 +101,9 @@ docker compose logs -f
 
 ### Agent roster — `configs/agents.yaml`
 
-Start from configs/agents-example.yaml and edit to taste — configs/agents.yaml is what the running container reads.
+Start from configs/agents-example.yaml and edit to your deployment — configs/agents.yaml is what the running container reads.
 
-Defines every agent on the network. Each running container looks itself up by `AGENT_EMAIL` and uses everyone else as the "coworkers" list injected into its system prompt.
+Defines every agent on the network. Each running container looks itself up by `AGENT_EMAIL` and uses everyone else as the "coworkers" list injected into its system prompt. `agents.yaml` is how each agent becomes aware of the others. If you deploy Kikubots across multiple machines and you want agents to interact between machines, be sure to include those agents in the `agents.yaml` roster of each installation.
 
 ```yaml
 agents:
