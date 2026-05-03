@@ -47,4 +47,4 @@ Access control is tested against all senders of an email. If an email is forward
 - BLACKLIST
   - If an email is from one of these addresses or domains, reject it.
 
-> EXTREMELY IMPORTANT: Access Control will only be as good as your email domain security settings. Please ensure SPF, DKIM, DMARC, and other email security measures are properly configured to prevent spoofing and phishing attacks.
+> ‼️EXTREMELY IMPORTANT: Access Control will only be as good as your email domain security settings. Please ensure SPF, DKIM, DMARC, and other email security measures are properly configured to prevent spoofing and phishing attacks.
