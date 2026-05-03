@@ -16,6 +16,6 @@ func LoadEnvFile() {
 	log.Println("[DEBUG] USING COMMON ENVIRONMENT VARIABLES")
 	err2 := godotenv.Overload("./configs/env/kiku.env")
 	if err2 == nil {
-		log.Println("[DEBUG] USING DEV ENVIRONMENT VARIABLES")
+		log.Println("[DEBUG] USING KIKU ENVIRONMENT VARIABLES")
 	}
 }

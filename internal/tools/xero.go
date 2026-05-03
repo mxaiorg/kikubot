@@ -19,6 +19,8 @@ Not a great solution since it requires a user to log in. But good for testing.
 */
 
 func XeroMCP() []ToolDefinition {
+	log.Println("CLIENT_ID: ", config.XeroClientId)
+
 	xeroConfig := LocalMCPConfig{
 		ServerName: "xero",
 		Command:    "npx",

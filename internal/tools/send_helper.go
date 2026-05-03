@@ -207,13 +207,33 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 			return "", fmt.Errorf("no reply email found")
 		}
 		replyEmail := replyEmails[0]
-		references = append(replyEmail.References, replyEmail.MessageId)
 		if strings.HasPrefix(replyEmail.Subject, "Re: ") {
 			subject = replyEmail.Subject
 		} else {
 			subject = "Re: " + replyEmail.Subject
 		}
 		content = services.ReplyBody(&replyEmail, params.Message)
+
+		// Threading: when the inbound that triggered this turn (srcEmail)
+		// shares a thread with the LLM's chosen reply target, always
+		// thread off srcEmail. The LLM sometimes picks an older ancestor
+		// — e.g. the original requester's message when "reporting back"
+		// — which collapses References to just the root and orphans the
+		// outbound from the latest activity in the thread. The LLM still
+		// controls quoted body content via its choice of replyEmail
+		// above; it just doesn't get to redirect the threading parent.
+		if srcEmail != nil && srcEmail.MessageId != "" && sameThread(srcEmail, &replyEmail) {
+			srcId := services.EnsureAngleBrackets(srcEmail.MessageId)
+			replyId := services.EnsureAngleBrackets(replyEmail.MessageId)
+			if srcId != replyId {
+				log.Printf("threading: overriding LLM In-Reply-To %s with trusted srcEmail %s",
+					replyId, srcId)
+			}
+			inReplyTo = srcId
+			references = append(srcEmail.References, srcId)
+		} else {
+			references = append(replyEmail.References, replyEmail.MessageId)
+		}
 	} else if forward != "" {
 		fwdEmails, fwdErr := services.GetEmails(ctx, []string{forward})
 		if fwdErr != nil {
@@ -302,19 +322,23 @@ func sendReportEmail(ctx context.Context, input json.RawMessage) (string, error)
 }
 
 // healReportRecipient returns tool input with a corrected "To" for
-// report_tool replies. When the call carries an In-Reply-To, we always
-// walk the thread for the newest human sender and — if the LLM's To list
-// doesn't already include that human — substitute it. This catches three
-// common LLM failures with one mechanism: (a) Message-Id pasted into To,
-// (b) hallucinated / typoed domain (e.g. alex@mail.mxhero.com), and
-// (c) stale address from training data instead of the actual sender.
+// report_tool replies. The strategy is membership-based, not equality-
+// based: we collect every non-agent participant in the thread and trust
+// the LLM's To when every recipient belongs to that set. Multi-party
+// threads can have several legitimate reply targets (original requester
+// + follow-up correspondent), and forcing equality with the most-recent
+// human would substitute one valid choice for another.
 //
-// When no human can be resolved from the thread AND the supplied To is
-// clearly wrong (matches a thread Message-Id), we surface an actionable
-// error so the LLM retries. Otherwise the LLM's value is trusted.
+// Heal only intervenes when a recipient clearly doesn't belong to the
+// thread, which catches three common LLM failures with one mechanism:
+// (a) Message-Id pasted into To, (b) hallucinated / typoed domain
+// (e.g. alex@mail.mxhero.com), and (c) stale address from training data.
+// In those cases we substitute the newest human walked from the trusted
+// inbound (srcEmail), or surface an actionable error if no human can be
+// resolved and the To looks like a Message-Id.
 //
-// New emails (no In-Reply-To) are untouched — the LLM may legitimately be
-// sending to a third party. Peer-to-peer delegation goes through
+// New emails (no In-Reply-To) are untouched — the LLM may legitimately
+// be sending to a third party. Peer-to-peer delegation goes through
 // sendEmailInternal and does not reach this function.
 func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
 	var params sendMailMsg
@@ -332,22 +356,40 @@ func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMe
 	}
 	replyEmail := replyEmails[0]
 
-	toRecipients := commaSplitReg.Split(params.To, -1)
-	human, foundHuman := findHumanInThread(ctx, &replyEmail)
+	// Prefer the trusted inbound (srcEmail) as the seed for thread walks
+	// whenever it sits in the same thread as the LLM's chosen reply target.
+	// The LLM may pick an older ancestor as In-Reply-To (e.g. the root,
+	// when "reporting back" to the original requester); seeding from that
+	// ancestor short-circuits findHumanInThread on the first non-agent it
+	// sees and can substitute the conversation's original sender for the
+	// LLM's correctly-chosen, more recent correspondent. srcEmail is the
+	// newest known message in the chain — its From + References cover
+	// everyone we need.
+	seed := &replyEmail
+	if src := services.SourceEmail(ctx); src != nil && sameThread(src, &replyEmail) {
+		seed = src
+	}
 
-	// Happy path: the LLM's To already contains the thread's human
-	// sender. Trust the full To list (preserves legitimate multi-recipient
-	// replies where the LLM CCs additional mxhero.com folks into To).
-	if foundHuman && toContainsAddress(toRecipients, human) {
+	toRecipients := commaSplitReg.Split(params.To, -1)
+
+	// Trust the LLM's To when every recipient is a known human participant
+	// in this thread. Multi-party threads have multiple legitimate reply
+	// targets — e.g. the original requester *and* a follow-up correspondent
+	// — and the LLM may rationally pick any of them. Heal should only step
+	// in when a recipient clearly doesn't belong (typoed domain, stale
+	// address, Message-Id pasted as To).
+	humans := collectHumansInThread(ctx, seed)
+	if len(humans) > 0 && allRecipientsInHumans(toRecipients, humans) {
 		return input, nil
 	}
 
-	// Detect the specific "Message-Id pasted as To" pathology for error
-	// messaging. Useful as a crisp signal when we also can't resolve a
-	// human from the thread.
-	threadIds := make([]string, 0, len(replyEmail.References)+2)
-	threadIds = append(threadIds, replyEmail.MessageId, inReplyTo)
-	threadIds = append(threadIds, replyEmail.References...)
+	// Fallback: identify the newest human for substitution, and detect
+	// Message-Id-as-To conflation for an actionable error.
+	human, foundHuman := findHumanInThread(ctx, seed)
+
+	threadIds := make([]string, 0, len(seed.References)+2)
+	threadIds = append(threadIds, seed.MessageId, inReplyTo)
+	threadIds = append(threadIds, seed.References...)
 	conflation := toMatchesMessageIds(toRecipients, threadIds)
 
 	if !foundHuman {
@@ -383,24 +425,71 @@ func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMe
 	return out, nil
 }
 
-// toContainsAddress reports whether `to` includes `target` (bare, lowercased)
-// either as a raw string or after RFC 5322 parsing. Used to decide whether
-// the LLM's To already includes the thread's human sender.
-func toContainsAddress(to []string, target string) bool {
-	if target == "" {
+// collectHumansInThread returns the set of non-agent sender addresses
+// (lowercased) participating in the thread reachable from `seed`. The
+// seed's own From plus the From of every message reachable via its
+// References are inspected; agent addresses (per global.AgentEmails)
+// are excluded. Missing messages are silently skipped — we use the
+// cached IMAP fetcher and best-effort coverage is fine because the
+// caller falls through to a substitution path when the set is empty.
+//
+// Used to validate LLM-supplied recipients: any address that ever sent
+// into the thread is a legitimate reply target, so heal should not
+// overwrite it with the most-recent-human alone.
+func collectHumansInThread(ctx context.Context, seed *services.Email) map[string]bool {
+	humans := map[string]bool{}
+	if seed == nil || len(config.AgentEmails) == 0 {
+		return humans
+	}
+	if addr := bareAddressFromEmail(seed.From); addr != "" && !config.AgentEmails[addr] {
+		humans[addr] = true
+	}
+	if len(seed.References) == 0 {
+		return humans
+	}
+	ids := make([]string, 0, len(seed.References))
+	for _, ref := range seed.References {
+		if id := services.EnsureAngleBrackets(ref); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return humans
+	}
+	emails, err := services.GetEmails(ctx, ids)
+	if err != nil {
+		return humans
+	}
+	for _, m := range emails {
+		if addr := bareAddressFromEmail(m.From); addr != "" && !config.AgentEmails[addr] {
+			humans[addr] = true
+		}
+	}
+	return humans
+}
+
+// allRecipientsInHumans reports whether every entry in `to` resolves to
+// an address present in `humans`. Returns false on empty input so the
+// caller falls through to the substitute path. Recipients are parsed as
+// RFC 5322 addresses when possible; raw strings are lower-cased as a
+// fallback so a bare "user@host" is matched.
+func allRecipientsInHumans(to []string, humans map[string]bool) bool {
+	if len(to) == 0 {
 		return false
 	}
-	target = strings.ToLower(target)
 	for _, r := range to {
-		raw := strings.ToLower(strings.TrimSpace(r))
-		if raw == target {
-			return true
+		addr := bareAddressFromEmail(r)
+		if addr == "" {
+			addr = strings.ToLower(strings.TrimSpace(r))
 		}
-		if addr := bareAddressFromEmail(r); addr == target {
-			return true
+		if addr == "" {
+			return false
+		}
+		if !humans[addr] {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // knownPeerEmails returns a sorted list of agent emails in
@@ -458,6 +547,24 @@ func toMatchesMessageIds(to []string, ids []string) bool {
 		}
 	}
 	return true
+}
+
+// sameThread reports whether two emails belong to the same RFC 5322 thread,
+// determined by comparing their thread roots (References[0] when present,
+// otherwise the message's own Message-Id). Angle brackets are normalized so
+// that a root captured from a References list ("<id>") matches one captured
+// from a Message-Id header (raw "id" or "<id>"). Returns false when either
+// side is nil or has no resolvable root.
+func sameThread(a, b *services.Email) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	rootA := services.EnsureAngleBrackets(a.GetThreadRoot())
+	rootB := services.EnsureAngleBrackets(b.GetThreadRoot())
+	if rootA == "" || rootB == "" {
+		return false
+	}
+	return strings.EqualFold(rootA, rootB)
 }
 
 // findHumanInThread walks a thread newest→oldest looking for the first

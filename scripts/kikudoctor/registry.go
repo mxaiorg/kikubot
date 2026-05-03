@@ -10,9 +10,9 @@ import (
 	"strconv"
 )
 
-// loadRegistryKeys parses internal/tools/registry.go and returns the set of
-// string keys declared in the top-level `registry` map literal.
-func loadRegistryKeys(root string, r *Report) (map[string]bool, bool) {
+// loadRegistry parses internal/tools/registry.go and returns the set of
+// string keys, plus a key → factory function name map (peeling `wrap(X)` to X).
+func loadRegistry(root string, r *Report) (map[string]bool, map[string]string, bool) {
 	path := filepath.Join(root, "internal", "tools", "registry.go")
 	sec := r.Section(fmt.Sprintf("tool registry (%s)", relPath(root, path)))
 
@@ -20,10 +20,11 @@ func loadRegistryKeys(root string, r *Report) (map[string]bool, bool) {
 	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 	if err != nil {
 		sec.Fail("cannot parse: %v", err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	keys := map[string]bool{}
+	factories := map[string]string{}
 	for _, decl := range f.Decls {
 		gd, ok := decl.(*ast.GenDecl)
 		if !ok || gd.Tok != token.VAR {
@@ -63,6 +64,9 @@ func loadRegistryKeys(root string, r *Report) (map[string]bool, bool) {
 						continue
 					}
 					keys[unquoted] = true
+					if name := factoryName(kv.Value); name != "" {
+						factories[unquoted] = name
+					}
 				}
 			}
 		}
@@ -70,10 +74,26 @@ func loadRegistryKeys(root string, r *Report) (map[string]bool, bool) {
 
 	if len(keys) == 0 {
 		sec.Fail("no keys found in registry map")
-		return keys, false
+		return keys, factories, false
 	}
 	sec.Pass("found %d registered tool key(s): %s", len(keys), formatSortedSet(keys))
-	return keys, true
+	return keys, factories, true
+}
+
+// factoryName extracts the leaf factory function name from a registry value.
+// Handles bare identifiers (`MxMCP`) and `wrap(X)` calls — both common in the
+// existing registry. Anything more elaborate is reported as "" and skipped by
+// downstream checks.
+func factoryName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.CallExpr:
+		if id, ok := e.Fun.(*ast.Ident); ok && id.Name == "wrap" && len(e.Args) == 1 {
+			return factoryName(e.Args[0])
+		}
+	}
+	return ""
 }
 
 // validateAgentTools verifies that each tool listed by a locally-deployed
