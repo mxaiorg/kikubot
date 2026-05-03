@@ -461,6 +461,9 @@ func initAgent() {
 
 	// Deduplicate scripts by name
 	agentTools = dedupTools(agentTools)
+	//for _, tool := range agentTools {
+	//	log.Println("loaded tool:", tool.Name)
+	//}
 
 	var coworkerClause string
 	if cfg != nil {

@@ -54,6 +54,10 @@ var (
 	TikaUrl string
 	// mxMCP API Key
 	MxMcpApiKey string
+	// Tavily API Key
+	TavilyApiKey string
+	// Vimeo API Key
+	VimeoApiKey string
 )
 
 var splitRegexp = regexp.MustCompile(`\s*,\s*`)
@@ -159,6 +163,10 @@ func LoadEnv() {
 	TikaUrl = GetEnvWithoutQuotesSafe("TIKA_URL", "http://localhost:9998")
 	// mxMCP API Key
 	MxMcpApiKey = os.Getenv("MXMCP_API_KEY")
+	// Tavily API Key
+	TavilyApiKey = os.Getenv("TAVILY_API_KEY")
+	// Vimeo API Key
+	VimeoApiKey = os.Getenv("VIMEO_API_KEY")
 }
 
 func GetEnvWithoutQuotesSafe(key, fallback string) string {

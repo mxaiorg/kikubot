@@ -26,6 +26,7 @@ var registry = map[string]toolFactory{
 	"bash":                 wrap(BashTool),
 	"xero_mcp":             XeroMCP,
 	"tavily_mcp":           TavilyMCP,
+	"vimeo":                Vimeo,
 }
 
 // LookupTools returns the scripts for a given services key.

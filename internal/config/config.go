@@ -16,7 +16,7 @@ type AgentDef struct {
 	Email       string   `yaml:"email" json:"email,omitempty"`
 	Role        string   `yaml:"role" json:"role,omitempty"`
 	Description string   `yaml:"description" json:"description,omitempty"`
-	Tools       []string `yaml:"scripts" json:"-"`
+	Tools       []string `yaml:"tools" json:"-"`
 }
 
 type AgentsConfig struct {

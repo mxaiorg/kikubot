@@ -43,9 +43,10 @@ func main() {
 	localAccounts := localAgentAccounts(cf)
 
 	af, _ := loadAgents(abs, r)
-	keys, _ := loadRegistryKeys(abs, r)
+	keys, factories, _ := loadRegistry(abs, r)
 	if af != nil && keys != nil {
 		validateAgentTools(af, keys, localAccounts, r)
+		validateNpxPackages(abs, af, localAccounts, factories, r)
 	}
 	validateEnvFiles(abs, af, r)
 	validateCompose(abs, cf, r)
