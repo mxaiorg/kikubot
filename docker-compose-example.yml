@@ -10,7 +10,6 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "AGENT_SERVER_HOST:host-gateway" # for local development
     volumes:
       - ./data/kiku:/app/data
 
@@ -24,7 +23,6 @@ services:
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
-      - "AGENT_SERVER_HOST:host-gateway" # for local development
 #    volumes:
 #      - ./data/beta:/app/data
 #
@@ -38,7 +36,6 @@ services:
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
-      - "AGENT_SERVER_HOST:host-gateway" # for local development
 #    volumes:
 #      - ./data/gamma:/app/data
 #
@@ -52,6 +49,5 @@ services:
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
-      - "AGENT_SERVER_HOST:host-gateway" # for local development
 #    volumes:
 #      - ./data/delta:/app/data
