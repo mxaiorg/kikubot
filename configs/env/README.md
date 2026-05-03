@@ -30,7 +30,7 @@ Typical per agent settings are:
 - SYSTEM_PROMPT
   - This agent's system prompt. If not set, the default system prompt will be used. Include `{{coworkers}}` template variable to provide coworker awareness. Most important for coordinating agents.
 
-### Access Control Environment Variables
+### Access Control Environment Variables (ACL)
 
 To control who can access the agent, use the following environment WHITELIST and BLACKLIST variables.
 
@@ -46,3 +46,5 @@ Access control is tested against all senders of an email. If an email is forward
   - Only accept emails from these addresses or domains.
 - BLACKLIST
   - If an email is from one of these addresses or domains, reject it.
+
+> EXTREMELY IMPORTANT: Access Control will only be as good as your email domain security settings. Please ensure SPF, DKIM, DMARC, and other email security measures are properly configured to prevent spoofing and phishing attacks.
