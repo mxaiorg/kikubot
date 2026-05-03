@@ -85,7 +85,10 @@ cp docker-compose.yml.example docker-compose.yml
 #    - Set the environment and volume mounts to match your agent specific env files
 #      and data folder
 
-# 3. Launch.
+# 4. Validate.
+go run scripts/kikudoctor/*.go
+
+# 5. Launch.
 docker compose up -d --build
 ```
 
