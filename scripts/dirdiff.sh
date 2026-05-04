@@ -34,7 +34,7 @@ EOF
 
 SRC=""
 DEST=""
-IGNORES=()
+IGNORES=(.DS_Store)
 SHOWDIFF=0
 
 while [[ $# -gt 0 ]]; do

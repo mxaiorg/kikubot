@@ -58,6 +58,7 @@ func MessageTool() ToolDefinition {
 		Execute: sendEmailInternal,
 		StaticSystem: "- Communicate with coworkers using the message_tool\n" +
 			"- Whenever sending messages with the message_tool, use the set_task_status tool to update the status of a task.\n" +
-			"- If the body of your message would exceed roughly a few hundred lines (CSV, large JSON, long logs, multi-page tables), put the bulk in an `attachments` entry and keep `Message` to a short cover note. Stuffing large payloads into `Message` will exceed the model's output limit, truncate the tool call, and force a retry.",
+			"- If the body of your message would exceed roughly a few hundred lines (CSV, large JSON, long logs, multi-page tables), put the bulk in an `attachments` entry and keep `Message` to a short cover note. Stuffing large payloads into `Message` will exceed the model's output limit, truncate the tool call, and force a retry.\n" +
+			"- When delegating a task that requires a coworker to see an attachment from an inbound email, use `X-Forwarded` with that email's Message-Id rather than rebuilding the file in `attachments`. The system re-fetches the original message and re-attaches its files byte-for-byte; the `attachments` field cannot reproduce binary content you have not seen (you will at best send a placeholder). Reserve the `attachments` field for files you authored yourself in this turn (reports, exports, generated text).",
 	}
 }

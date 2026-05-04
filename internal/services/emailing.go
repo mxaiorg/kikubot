@@ -320,31 +320,24 @@ func extractOfficeText(data []byte, ext string) (string, bool) {
 }
 
 // tikaExtractText converts an arbitrary file to plain text via Apache Tika.
-// It is the catch-all converter for formats not handled natively (images with
-// OCR, RTF, ODF, MSG, etc.). Returns false until a Tika server URL is
-// configured via the TIKA_URL environment variable.
-//
-// TODO: implement — POST att.Data to $TIKA_URL/tika with the appropriate
-// Content-Type header and read the plain-text response body.
+// It is the catch-all converter for formats not handled natively (RTF, ODF,
+// MSG, etc.) and is invoked from attachmentToContentBlock after the format-
+// specific paths have all declined. Returns ("", false) on any failure so
+// the caller falls through to skipping the attachment.
 func tikaExtractText(name string, data []byte) (string, bool) {
-	// tikaURL := os.Getenv("TIKA_URL")
-	// if tikaURL == "" {
-	// 	return "", false
-	// }
-	// resp, err := http.Post(tikaURL+"/tika", mime.TypeByExtension(filepath.Ext(name)), bytes.NewReader(data))
-	// if err != nil || resp.StatusCode != http.StatusOK {
-	// 	log.Printf("tika: failed to convert %s: %v", name, err)
-	// 	return "", false
-	// }
-	// defer resp.Body.Close()
-	// text, err := io.ReadAll(resp.Body)
-	// if err != nil {
-	// 	return "", false
-	// }
-	// return strings.TrimSpace(string(text)), true
-	_ = name
-	_ = data
-	return "", false // not yet implemented
+	if len(data) == 0 {
+		return "", false
+	}
+	text, err := ExtractTextFromBytes(data, name)
+	if err != nil {
+		log.Printf("tika: failed to convert %s (%d bytes): %v", name, len(data), err)
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 func imageMediaType(ext string) (string, bool) {

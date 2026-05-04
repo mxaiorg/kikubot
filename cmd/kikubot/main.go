@@ -74,7 +74,7 @@ func process(parent context.Context) {
 	if len(emails) > 0 {
 		var processed []string // Message-Ids to mark as seen
 		for _, email := range emails {
-			log.Println("new email:", email.MessageId)
+			fmt.Println("NEW EMAIL:", email.MessageId)
 			email.Senders = services.AddToSenders(email.Senders, email.From)
 
 			// Auto-replies (bounces, out-of-office) MUST NOT reach the LLM.
