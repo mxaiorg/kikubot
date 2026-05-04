@@ -269,12 +269,15 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 		content = params.Message
 	}
 
-	// Decode LLM-provided attachments
+	// Decode LLM-provided attachments. Surface failures back to the model
+	// instead of silently dropping — an attachment the LLM intended to send
+	// but couldn't construct is almost always a sign of "I'm trying to
+	// forward something I never had bytes for", and the right correction
+	// (X-Forwarded) only happens if we tell it.
 	for _, ap := range params.Attachments {
 		att, err := ap.toAttachment()
 		if err != nil {
-			log.Printf("warning: skipping attachment %s: %v", ap.Name, err)
-			continue
+			return "", err
 		}
 		attachments = append(attachments, att)
 	}
@@ -610,6 +613,17 @@ type attachmentParam struct {
 }
 
 func (ap attachmentParam) toAttachment() (services.Attachment, error) {
+	if strings.TrimSpace(ap.Content) == "" {
+		return services.Attachment{}, fmt.Errorf(
+			"attachment %q has empty content — you cannot reproduce binary "+
+				"content you have not seen. To include a file from an inbound "+
+				"email, use `X-Forwarded` with that email's Message-Id; the "+
+				"system will re-fetch and re-attach the original bytes. The "+
+				"`attachments` field is only for files you authored in this "+
+				"turn (reports, exports, generated text)",
+			ap.Name,
+		)
+	}
 	var data []byte
 	switch ap.Encoding {
 	case "base64":
@@ -622,6 +636,12 @@ func (ap attachmentParam) toAttachment() (services.Attachment, error) {
 		data = []byte(ap.Content)
 	default:
 		return services.Attachment{}, fmt.Errorf("unsupported encoding: %s", ap.Encoding)
+	}
+	if len(data) == 0 {
+		return services.Attachment{}, fmt.Errorf(
+			"attachment %q decoded to 0 bytes — see `X-Forwarded` for forwarding inbound files",
+			ap.Name,
+		)
 	}
 	return services.Attachment{Name: ap.Name, Data: data}, nil
 }

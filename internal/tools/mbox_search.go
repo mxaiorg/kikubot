@@ -109,7 +109,46 @@ func searchMbox(ctx context.Context, input json.RawMessage) (string, error) {
 		return "No emails found matching the given criteria.", nil
 	}
 
-	result, err := json.Marshal(emails)
+	// Project to a slim shape — never serialize raw attachment bytes here.
+	// `Attachment.Data` is `[]byte`, which encoding/json renders as base64;
+	// a single 3 MB attachment can balloon a tool_result into ~4 MB of
+	// useless payload, blow up history, and starve trim of any room. Slim
+	// summaries give the agent everything it needs to follow up (it can
+	// `services.GetEmails` a specific Message-Id when it actually needs
+	// the body or attachments).
+	type attachmentSummary struct {
+		Name string `json:"name"`
+		Size int    `json:"size_bytes"`
+	}
+	type emailSummary struct {
+		MessageId   string              `json:"message-id,omitempty"`
+		From        string              `json:"from,omitempty"`
+		To          []string            `json:"to,omitempty"`
+		Cc          []string            `json:"cc,omitempty"`
+		Date        time.Time           `json:"date"`
+		Subject     string              `json:"subject,omitempty"`
+		InReplyTo   string              `json:"inReplyTo,omitempty"`
+		References  []string            `json:"references,omitempty"`
+		Content     string              `json:"content,omitempty"`
+		Attachments []attachmentSummary `json:"attachments,omitempty"`
+	}
+	summaries := make([]emailSummary, 0, len(emails))
+	for _, e := range emails {
+		s := emailSummary{
+			MessageId: e.MessageId, From: e.From, To: e.To, Cc: e.Cc,
+			Date: e.Date, Subject: e.Subject,
+			InReplyTo: e.InReplyTo, References: e.References,
+			Content: e.Content,
+		}
+		for _, a := range e.Attachments {
+			s.Attachments = append(s.Attachments, attachmentSummary{
+				Name: a.Name, Size: len(a.Data),
+			})
+		}
+		summaries = append(summaries, s)
+	}
+
+	result, err := json.Marshal(summaries)
 	if err != nil {
 		return "", fmt.Errorf("marshaling results: %w", err)
 	}

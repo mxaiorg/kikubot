@@ -120,11 +120,19 @@ func LoadEnv() {
 	} else {
 		MaxHistoryChars = maxHistChars
 	}
-	maxToolRes, parseToolErr := strconv.Atoi(os.Getenv("MAX_TOOL_RESULT_CHARS"))
-	if parseToolErr != nil || maxToolRes < 0 {
-		MaxToolResultChars = 0 // no limit
-	} else {
+	// Default cap on a single tool result. A few tools (mailbox_search, mxmcp,
+	// MCP bridges) can return arbitrarily large payloads; without a cap, one
+	// runaway result balloons history past trim budget and the agent loses
+	// anchor context on subsequent turns. 80 KB ≈ 20 K tokens — plenty for any
+	// reasonable tool output, small enough that a few stacked results still
+	// leave room. Set MAX_TOOL_RESULT_CHARS=0 explicitly to disable.
+	rawToolRes, hasToolRes := os.LookupEnv("MAX_TOOL_RESULT_CHARS")
+	if !hasToolRes {
+		MaxToolResultChars = 80000
+	} else if maxToolRes, parseToolErr := strconv.Atoi(rawToolRes); parseToolErr == nil && maxToolRes >= 0 {
 		MaxToolResultChars = maxToolRes
+	} else {
+		MaxToolResultChars = 80000
 	}
 	maxRetries, maxRetriesErr := strconv.Atoi(os.Getenv("MAX_EMAIL_RETRIES"))
 	if maxRetriesErr != nil || maxRetries <= 0 {
