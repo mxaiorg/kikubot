@@ -18,6 +18,7 @@ services:
       - ./config:/tmp/docker-mailserver
       - ./certs:/tmp/dms/custom-certs:ro
     environment:
+      - POSTFIX_MESSAGE_SIZE_LIMIT=20971520   # 20 MB, in bytes
       - ENABLE_CLAMAV=0
       - ENABLE_OPENDKIM=0
       - ENABLE_OPENDMARC=0
