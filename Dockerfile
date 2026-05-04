@@ -11,7 +11,7 @@ RUN go build -o kiku ./cmd/kikubot/main.go
 
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates nodejs npm
+RUN apk add --no-cache ca-certificates nodejs npm bash curl jq
 
 # Pre-install MCP server & CLI packages so npx doesn't download them at runtime
 #RUN npm install --global @tsmztech/mcp-server-salesforce

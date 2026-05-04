@@ -22,6 +22,33 @@ To configure, be sure to set the following environment variables:
 The user should use an "Application Password". (Application Passwords are generated from the WordPress dashboard under Users > Your Profile > Application Passwords. They provide secure access to the REST API without exposing your main account credentials.)
 
 The bash_exec tool is also added as it is required for WordPress tasks.
+
+# Runtime image requirements
+
+The workflow returned by executeWordPress is shell-driven and assumes the
+following binaries are present in the runtime image. Adding `wordpress` to
+an agent's tool set without these will fail at runtime — bash_exec returns
+`bash: not found` (or `curl: not found`) and the agent has no working path
+to update the site:
+
+  - bash    — executeBash invokes /bin/bash directly, not /bin/sh
+  - curl    — used for every REST call in the workflow
+  - jq      — used to extract .content.raw and to build update payloads
+
+On Alpine, install with:
+
+  apk add --no-cache bash curl jq
+
+The base Dockerfile (./Dockerfile) installs these. Any image that strips
+them down — minimal/scratch builds, or other agent images that get added
+later — must keep them, or the wordpress tool's prescribed workflow won't
+run.
+
+When adding new shell-driven tools to this codebase, document their
+runtime dependencies in a comment like this one and update the Dockerfile
+in the same change. The agent has no way to recover from "binary missing"
+beyond reporting it back to the user, so the dependency surface needs to
+be tracked in the source tree, not discovered in production.
 */
 
 // WordPressTool returns a lightweight tool that the model calls when it needs
