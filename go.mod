@@ -9,9 +9,9 @@ require (
 	github.com/gomarkdown/markdown v0.0.0-20260417124207-7d523f7318df
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
-	github.com/mark3labs/mcp-go v0.49.0
+	github.com/mark3labs/mcp-go v0.51.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/revrost/go-openrouter v1.2.0
+	github.com/revrost/go-openrouter v1.4.0
 	github.com/robfig/cron v1.2.0
 	golang.org/x/net v0.53.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
@@ -25,6 +25,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
