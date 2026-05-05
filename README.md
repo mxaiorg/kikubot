@@ -371,6 +371,10 @@ go run -tags=dev cmd/kikubot/main.go
 
 Architectural notes for code changes live in [`CLAUDE.md`](CLAUDE.md).
 
+## Naming
+
+We named our framework, Kikubot, from the Japanese contraction for Kiku (機駆) - 機 (ki, "mechanism") + 駆 (ku, "to drive/propel"). A machine that moves.
+
 ## License
 
 [MIT](LICENSE) — © mxHERO Inc.
