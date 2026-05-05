@@ -377,4 +377,4 @@ We named our framework, Kikubot, from the Japanese contraction for Kiku (機駆)
 
 ## License
 
-[MIT](LICENSE) — © mxHERO Inc.
+[MIT](LICENSE) — © [mxHERO](https://mxhero.com) Inc.
