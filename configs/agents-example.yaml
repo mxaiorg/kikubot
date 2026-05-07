@@ -6,7 +6,7 @@ agents:
     email: kiku@agents.example.com
     role: "Coordinator"
     description: "Communicates with users. Manages tasks and resources. Coordinates other agents."
-    tools: [report, snooze, unsnooze]
+    tools: [report, snooze]
 
   - name: Beta
     email: beta@agents.example.com

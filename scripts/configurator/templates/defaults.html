@@ -1,0 +1,44 @@
+{{define "defaults"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+{{with .Data}}
+<header class="page-header">
+  <h1>Agent Defaults</h1>
+  <p class="lead">Configure the agents you want to run on this machine. Each agent will run in its own container. Values here are written to <code>configs/env/common.env</code> and inherited by every agent.</p>
+</header>
+<form class="card" method="post" action="/agents/defaults">
+  <div class="grid">
+    <label>EMAIL_SERVER
+      <input name="EMAIL_SERVER" value="{{.EmailServer}}" placeholder="mail-agents.example.com:993">
+    </label>
+    <label>SMTP_SERVER
+      <input name="SMTP_SERVER" value="{{.SMTPServer}}" placeholder="mail-agents.example.com">
+    </label>
+    <label>SMTP_PORT
+      <input name="SMTP_PORT" value="{{.SMTPPort}}" placeholder="587">
+    </label>
+    <label>AGENT_TIMEOUT (seconds)
+      <input name="AGENT_TIMEOUT" value="{{.AgentTimeout}}" placeholder="300">
+    </label>
+    <label>MAX_HISTORY_CHARS
+      <input name="MAX_HISTORY_CHARS" value="{{.MaxHistoryChars}}" placeholder="200000">
+    </label>
+    <label>MAX_TOKENS
+      <input name="MAX_TOKENS" value="{{.MaxTokens}}" placeholder="6000">
+    </label>
+    <label class="full">ANTHROPIC_API_KEY
+      <input type="password" name="ANTHROPIC_API_KEY" value="{{.AnthropicAPIKey}}" autocomplete="new-password">
+    </label>
+    <label class="full">OPENROUTER_API_KEY
+      <input type="password" name="OPENROUTER_API_KEY" value="{{.OpenRouterKey}}" autocomplete="new-password">
+    </label>
+    <label class="full">SYSTEM_PROMPT
+      <textarea name="SYSTEM_PROMPT" rows="6">{{.SystemPrompt}}</textarea>
+      <small class="hint">Tokens like <code>{{"{{coworkers}}"}}</code> are interpolated by kikubot at runtime.</small>
+    </label>
+  </div>
+  <div class="actions">
+    <button type="submit" class="primary">Save defaults</button>
+  </div>
+</form>
+{{end}}
+{{end}}

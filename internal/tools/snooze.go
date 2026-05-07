@@ -12,6 +12,10 @@ import (
 	"github.com/robfig/cron"
 )
 
+func SnoozeTools() []ToolDefinition {
+	return []ToolDefinition{SnoozeTool(), UnSnoozeTool()}
+}
+
 func SnoozeTool() ToolDefinition {
 	return ToolDefinition{
 		Name:        "snooze_tool",

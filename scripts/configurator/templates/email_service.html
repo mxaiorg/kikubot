@@ -1,0 +1,72 @@
+{{define "email_service"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+{{with .Data}}
+<header class="page-header">
+  <h1>Email Service</h1>
+  <p class="lead">An optional bundled email server for agents. This server can be used as an agent-specific server to isolate and improve management visibility. Note: it runs on this machine. Other agents on other machines will need to point to this machine to participate in the same email domain.</p>
+</header>
+<form class="card" method="post" action="/email-service" data-email-form>
+  <label class="checkbox">
+    <input type="checkbox" name="enabled" id="email-enabled" value="1" {{if .Enabled}}checked{{end}}>
+    Use this service
+  </label>
+  <fieldset id="email-fields" {{if not .Enabled}}disabled{{end}}>
+    <div class="grid">
+      <label>Email Server Hostname
+        <input id="email-hostname" name="hostname" value="{{.Hostname}}" placeholder="mail.example.com">
+        <small class="hint">Set the hostname of this machine. Pre-populated from <code>services/dms/docker-compose.yml</code> when present.</small>
+      </label>
+      <label>Agent email domain
+        <input id="email-domain" name="agent_domain" value="{{.AgentDomain}}" placeholder="agents.example.com">
+        <small class="hint">Set the email domain. Defaults to the parent domain of the hostname.</small>
+      </label>
+    </div>
+
+    <fieldset class="subcard">
+      <legend>Access Security</legend>
+      <p class="hint">Strong spoofing protection is required to ensure accurate access controls. Configure SPF, DKIM, and DMARC for this domain at your DNS provider.</p>
+    </fieldset>
+
+    <fieldset class="subcard">
+      <legend>Delivery Security</legend>
+      <label class="checkbox">
+        <input type="checkbox" name="limit_delivery" id="limit-delivery" value="1" {{if .LimitDelivery}}checked{{end}}>
+        Limit the domains to which agents can respond
+      </label>
+      <label class="full" data-show-when="limit-delivery">Allowed delivery domains
+        <input name="delivery_domains" value="{{joinCSV .DeliveryDomains}}" placeholder="company.com, partner.com">
+        <small class="hint">Comma-separated list. Mail to any other domain is rejected. Mail within the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
+      </label>
+    </fieldset>
+
+    <fieldset class="subcard">
+      <legend>Accept Restriction</legend>
+      <label class="checkbox">
+        <input type="checkbox" name="limit_accept" id="limit-accept" value="1" {{if .LimitAccept}}checked{{end}}>
+        Limit from which domains or email addresses agents can receive emails
+      </label>
+      <label class="full" data-show-when="limit-accept">Allowed sender domains/emails
+        <input name="accept_domains" value="{{joinCSV .AcceptDomains}}" placeholder="company.com, partner@example.com">
+        <small class="hint">Comma-separated list of domains and/or email addresses. Mail from the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
+      </label>
+    </fieldset>
+
+    <fieldset class="subcard">
+      <legend>SSL Settings</legend>
+      {{if .SSL.BothPresent}}
+        <p class="status-ok">✅ fullchain.pem found</p>
+        <p class="status-ok">✅ privkey.pem found</p>
+      {{else}}
+        <p class="hint">Provide your agent email domain's private key and full certificate chain. Replace <code>services/dms/certs/fullchain-update.pem</code> and <code>services/dms/certs/privkey-update.pem</code> with your certificate, then save them as <code>fullchain.pem</code> and <code>privkey.pem</code> respectively.</p>
+        {{if not .SSL.FullchainExists}}<p class="status-bad">❌ fullchain.pem not found</p>{{end}}
+        {{if not .SSL.PrivkeyExists}}<p class="status-bad">❌ privkey.pem not found</p>{{end}}
+      {{end}}
+    </fieldset>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" class="primary">Save email service</button>
+  </div>
+</form>
+{{end}}
+{{end}}

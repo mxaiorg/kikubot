@@ -1,0 +1,103 @@
+{{define "agent_form"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+{{with .Data}}
+<header class="page-header">
+  <h1>{{if .OriginalStem}}Edit Agent{{else}}Add Agent{{end}}</h1>
+  <p class="lead">Per-agent variables override <code>common.env</code>. Values matching the common defaults are not duplicated to the agent file.</p>
+</header>
+<form class="card" method="post" action="/agents/save" data-agent-form>
+  <input type="hidden" name="original_stem" value="{{.OriginalStem}}">
+  <div class="grid">
+    <label>Agent name (AGENT_NAME)
+      <input name="name" value="{{.Name}}" required>
+    </label>
+    <label>Agent email (AGENT_EMAIL)
+      <input name="email" value="{{.Email}}" type="email" required placeholder="alpha@agents.example.com">
+    </label>
+    <label class="full">Email password (EMAIL_PASSWORD)
+      <input name="email_password" value="{{.EmailPassword}}" type="password" autocomplete="new-password">
+    </label>
+  </div>
+
+  <fieldset class="subcard">
+    <legend>Access Control</legend>
+    <p class="hint">Whitelist takes precedence; if a whitelist is set, blacklist is unavailable.</p>
+    <div class="grid">
+      <label class="full">Whitelist (WHITELIST)
+        <input name="whitelist" id="agent-whitelist" value="{{.Whitelist}}" placeholder="example.com, agents.example.com">
+        <small class="hint">Comma-separated domains (defined by no <code>@</code>) and email addresses.</small>
+      </label>
+      <label class="full">Blacklist (BLACKLIST)
+        <input name="blacklist" id="agent-blacklist" value="{{.Blacklist}}" placeholder="agents.example.com">
+        <small class="hint">Disabled while a whitelist is set.</small>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="subcard">
+    <legend>LLM</legend>
+    <div class="grid">
+      <label>Provider (LLM_PROVIDER)
+        <select name="llm_provider" id="agent-provider">
+          <option value="anthropic" {{if eq .LLMProvider "anthropic"}}selected{{end}}>anthropic</option>
+          <option value="openrouter" {{if eq .LLMProvider "openrouter"}}selected{{end}}>openrouter</option>
+        </select>
+      </label>
+      <label>Model (LLM_MODEL)
+        <input name="llm_model" id="agent-model" value="{{.LLMModel}}" required>
+        <small class="hint" data-provider-hint="anthropic">See <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener">Models overview</a>. Example: <code>claude-sonnet-4-6</code>.</small>
+        <small class="hint" data-provider-hint="openrouter">See <a href="https://openrouter.ai/models" target="_blank" rel="noopener">openrouter.ai/models</a>. Example: <code>z-ai/glm-5.1</code>.</small>
+      </label>
+      <label class="full" data-openrouter-only>Backup LLMs (LLM_OPENROUTER_BACKUP)
+        <input name="llm_openrouter_backup" value="{{.LLMOpenrouterBackup}}" placeholder="openai/gpt-5.5, google/gemini-3.1-pro-preview">
+        <small class="hint">Comma-separated fallback list, OpenRouter-only.</small>
+      </label>
+      <div class="full" data-coordinator-toggle data-system-default="{{.SystemPromptDefault}}" data-coordinator-default="{{.CoordinatorPromptDefault}}">
+        <label class="checkbox">
+          <input type="checkbox" id="coordinator-toggle">
+          Coordinator agent (seed System prompt with <code>COORDINATOR_SYS_PROMPT</code>)
+        </label>
+        <label>System prompt (SYSTEM_PROMPT)
+          <textarea name="system_prompt" id="system-prompt-textarea" rows="6" placeholder="Defaults to common.env SYSTEM_PROMPT">{{.SystemPrompt}}</textarea>
+        </label>
+      </div>
+      {{/*
+      <label class="checkbox">
+        <input type="checkbox" name="exclude_collaborators" value="1" {{if .ExcludeCollaborators}}checked{{end}}>
+        Exclude collaborators (omit {{"{{coworkers}}"}} from the system prompt)
+      </label>
+      */}}
+    </div>
+  </fieldset>
+
+  <fieldset class="subcard">
+    <legend>Roster Entry</legend>
+    <p class="hint">How this agent is presented to its colleagues. Saved to <code>configs/agents.yaml</code>.</p>
+    <div class="grid">
+      <label class="full">Role
+        <input name="role" value="{{.Role}}" placeholder="Social Media, Web Searcher" required>
+      </label>
+      <label class="full">Description
+        <input name="role_description" value="{{.RoleDesc}}" placeholder="Creates and posts social media posts in draft form. Searches the web for relevant content." required>
+      </label>
+      <div class="full">
+        <label>Tools</label>
+        <div class="chips" data-chip-input data-tools="{{toolsDataAttr .Registry}}" data-provider-source="agent-provider">
+          <div class="warn-banner is-hidden" data-tool-warning>⚠️ <code>anthropic_web_search</code> tool is not available for openrouter</div>
+          <input type="hidden" name="tools" value="{{join .Tools ","}}">
+          <div class="chips-list"></div>
+          <button type="button" class="add-chip ghost">+ Add tool</button>
+          <div class="chip-picker is-hidden"></div>
+        </div>
+        <small class="hint">Mouse over a tool for its description (parsed live from <code>internal/tools/</code>).</small>
+      </div>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" class="primary">Save agent</button>
+    <a class="ghost" href="/agents/list">Cancel</a>
+  </div>
+</form>
+{{end}}
+{{end}}

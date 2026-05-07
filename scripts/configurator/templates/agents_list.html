@@ -1,0 +1,29 @@
+{{define "agents_list"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+<header class="page-header">
+  <h1>Existing Agents</h1>
+  <p class="lead">Configured agents found in <code>configs/env/</code>, sorted alphabetically by name.</p>
+</header>
+<div class="card">
+  {{if .Data}}
+  <table class="table">
+    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
+    <tbody>
+    {{range .Data}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td><code>{{.Email}}</code></td>
+        <td>{{.Role}}</td>
+        <td><a class="primary" href="/agents/edit?stem={{.Stem}}">Edit</a></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <p class="empty">No agents configured yet. <a href="/agents/new">Add one</a>.</p>
+  {{end}}
+</div>
+<div class="actions">
+  <a class="primary" href="/agents/new">Add Agent</a>
+</div>
+{{end}}

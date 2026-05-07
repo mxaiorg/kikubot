@@ -1,0 +1,33 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Configurator</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js"></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">Agent Configurator</div>
+  <nav>
+    <div class="nav-group">Agents</div>
+    <a href="/agents/defaults" class="{{if eq .Active "defaults"}}active{{end}}">Agent Defaults</a>
+    <a href="/agents/new" class="{{if eq .Active "new"}}active{{end}}">Add Agent</a>
+    <a href="/agents/list" class="{{if eq .Active "list"}}active{{end}}">Existing Agents</a>
+    <div class="nav-group">Email</div>
+    <a href="/email-service" class="{{if eq .Active "email"}}active{{end}}">Email Service</a>
+  </nav>
+  <div class="sidebar-footer">
+    <button type="button" id="theme-toggle" class="theme-toggle">Toggle theme</button>
+    <div class="root-path" title="{{.Root}}">{{.Root}}</div>
+  </div>
+</aside>
+<main class="content">
+  <div id="flash" class="flash{{if .Flash}} show{{end}} {{.FlashKind}}">{{.Flash}}</div>
+  {{template "page" .}}
+</main>
+</body>
+</html>
+{{end}}

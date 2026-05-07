@@ -1,0 +1,16 @@
+{{define "home"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+<header class="page-header">
+  <h1>Agent Configurator</h1>
+  <p class="lead">Configure the kikubot deployment on this machine.</p>
+</header>
+<section class="card">
+  <h2>Quick links</h2>
+  <ul class="links">
+    <li><a href="/agents/defaults">Agent Defaults</a> — common variables shared across agents.</li>
+    <li><a href="/agents/new">Add Agent</a> — configure a new agent.</li>
+    <li><a href="/agents/list">Existing Agents</a> — review and edit existing agents.</li>
+    <li><a href="/email-service">Email Service</a> — bundled docker-mailserver settings.</li>
+  </ul>
+</section>
+{{end}}

@@ -59,7 +59,7 @@ func helpjuiceFAQRead() ToolDefinition {
 func helpjuiceFAQAppend() ToolDefinition {
 	return ToolDefinition{
 		Name:        "helpjuice_faq_append",
-		Description: `Append a new Q&A entry to a section of the Helpjuice FAQ article. The tool fetches the current article, splices in the new Q&A at the end of the specified section, and updates the article. You only need to provide the section, question, and answer — NOT the full article body. Sections: "GENERAL", "TECHNOLOGY", "IMPLEMENTATION", "GENERATIVE AI".`,
+		Description: `Append a new Q&A entry to a section of the Helpjuice FAQ article. The tool fetches the current article, splices in the new Q&A at the end of the specified section, and updates the article.`,
 		InputSchema: []byte(`{
 			"type": "object",
 			"properties": {
@@ -78,7 +78,8 @@ func helpjuiceFAQAppend() ToolDefinition {
 			},
 			"required": ["section", "question", "answer"]
 		}`),
-		Execute: executeHelpjuiceFAQAppend,
+		Execute:      executeHelpjuiceFAQAppend,
+		StaticSystem: "- You only need to provide the section, question, and answer — NOT the full article body. Sections: \"GENERAL\", \"TECHNOLOGY\", \"IMPLEMENTATION\", \"GENERATIVE AI\".",
 	}
 }
 

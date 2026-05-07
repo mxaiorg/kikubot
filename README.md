@@ -69,6 +69,11 @@ Each agent container runs an identical Go binary, parameterised by environment v
 
 ## Quick start
 
+> ### Configuration Dashboard Tool
+> A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already.
+
+### Manual Configuration
+
 ```bash
 git clone https://github.com/mxaiorg/kikubot
 cd kikubot
@@ -118,7 +123,7 @@ agents:
     email: kiku@agents.example.com
     role: "Coordinator"
     description: "Communicates with users. Coordinates other agents."
-    tools: [report, snooze, unsnooze, tavily_mcp]
+    tools: [report, snooze, tavily_mcp]
 
   - name: Beta
     email: beta@agents.example.com
@@ -216,6 +221,7 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `download`             | Fetch a URL to disk.                                                                                  |
 | `file_text`            | Convert any file to plain text via Apache Tika.                                                       |
 | `bash`                 | Execute arbitrary bash locally — full network access.                                                 |
+| `vimeo`                | Simplified read-only access to Vimeo library.                                                         |
 
 ### Writing your own tool
 
