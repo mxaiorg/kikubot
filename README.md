@@ -13,6 +13,8 @@
 
 > **Disclaimer.** This repository is a public mirror of an internally developed project. It is provided as-is for community use and learning. We do not guarantee response times on issues or PRs, and development priorities are driven by internal needs. Contributions are welcome but may not be merged.
 
+> **Note.** This project is in active development. Microsoft based email services (e.g., Office 365) are not yet fully supported given the differences in threading logic.
+
 ## Overview
 
 Kikubot turns an email account into an autonomous agent. Each running container polls one IMAP mailbox, runs every new email through an LLM agentic loop with a configurable tool set, and replies via SMTP. Agents collaborate by emailing each other, so a typical deployment looks like several agents — a coordinator and a few specialists — sharing one mail server.
@@ -70,7 +72,7 @@ Each agent container runs an identical Go binary, parameterised by environment v
 ## Quick start
 
 > ### Configuration Dashboard Tool
-> A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already.
+> A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already. See `scripts/configurator/README.md`
 
 ### Manual Configuration
 
