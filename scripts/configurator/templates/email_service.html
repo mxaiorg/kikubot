@@ -8,15 +8,15 @@
 <form class="card" method="post" action="/email-service" data-email-form>
   <label class="checkbox">
     <input type="checkbox" name="enabled" id="email-enabled" value="1" {{if .Enabled}}checked{{end}}>
-    Use this service
+    Use this service {{infoIcon "TBD"}}
   </label>
   <fieldset id="email-fields" {{if not .Enabled}}disabled{{end}}>
     <div class="grid">
-      <label>Email Server Hostname
+      <label><span class="field-label">Email Server Hostname {{infoIcon "TBD"}}</span>
         <input id="email-hostname" name="hostname" value="{{.Hostname}}" placeholder="mail.example.com">
         <small class="hint">Set the hostname of this machine. Pre-populated from <code>services/dms/docker-compose.yml</code> when present.</small>
       </label>
-      <label>Agent email domain
+      <label><span class="field-label">Agent email domain {{infoIcon "TBD"}}</span>
         <input id="email-domain" name="agent_domain" value="{{.AgentDomain}}" placeholder="agents.example.com">
         <small class="hint">Set the email domain. Defaults to the parent domain of the hostname.</small>
       </label>
@@ -31,9 +31,9 @@
       <legend>Delivery Security</legend>
       <label class="checkbox">
         <input type="checkbox" name="limit_delivery" id="limit-delivery" value="1" {{if .LimitDelivery}}checked{{end}}>
-        Limit the domains to which agents can respond
+        Limit the domains to which agents can respond {{infoIcon "TBD"}}
       </label>
-      <label class="full" data-show-when="limit-delivery">Allowed delivery domains
+      <label class="full" data-show-when="limit-delivery"><span class="field-label">Allowed delivery domains {{infoIcon "TBD"}}</span>
         <input name="delivery_domains" value="{{joinCSV .DeliveryDomains}}" placeholder="company.com, partner.com">
         <small class="hint">Comma-separated list. Mail to any other domain is rejected. Mail within the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
       </label>
@@ -43,9 +43,9 @@
       <legend>Accept Restriction</legend>
       <label class="checkbox">
         <input type="checkbox" name="limit_accept" id="limit-accept" value="1" {{if .LimitAccept}}checked{{end}}>
-        Limit from which domains or email addresses agents can receive emails
+        Limit from which domains or email addresses agents can receive emails {{infoIcon "TBD"}}
       </label>
-      <label class="full" data-show-when="limit-accept">Allowed sender domains/emails
+      <label class="full" data-show-when="limit-accept"><span class="field-label">Allowed sender domains/emails {{infoIcon "TBD"}}</span>
         <input name="accept_domains" value="{{joinCSV .AcceptDomains}}" placeholder="company.com, partner@example.com">
         <small class="hint">Comma-separated list of domains and/or email addresses. Mail from the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
       </label>

@@ -81,28 +81,22 @@
   provider?.addEventListener("change", syncProvider);
   syncProvider();
 
-  // ---- agent form: coordinator-prompt toggle ----
-  // Toggling the checkbox seeds the System Prompt textarea, but only when
-  // the textarea is empty or still equal to the *other* default — never
-  // overwrite content the user has already typed.
+  // ---- agent form: paste-coordinator-prompt button ----
+  // One-shot action: replace the System Prompt textarea with the
+  // COORDINATOR_SYS_PROMPT default. If the textarea isn't empty, confirm
+  // before overwriting so we don't trash content the user has typed.
   document.querySelectorAll("[data-coordinator-toggle]").forEach((root) => {
-    const cb = root.querySelector("#coordinator-toggle");
+    const btn = root.querySelector("#paste-coordinator");
     const ta = root.querySelector("#system-prompt-textarea");
-    const sysDefault = root.dataset.systemDefault || "";
     const coordDefault = root.dataset.coordinatorDefault || "";
-    if (!cb || !ta) return;
-    cb.addEventListener("change", () => {
-      const cur = ta.value;
-      let next = cur;
-      if (cb.checked) {
-        if (cur.trim() === "" || cur === sysDefault) next = coordDefault;
-      } else {
-        if (cur.trim() === "" || cur === coordDefault) next = sysDefault;
+    if (!btn || !ta) return;
+    btn.addEventListener("click", () => {
+      if (ta.value.trim() !== "" && ta.value !== coordDefault) {
+        if (!confirm("Replace the current system prompt with the Coordinator prompt?")) return;
       }
-      if (next !== cur) {
-        ta.value = next;
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      ta.value = coordDefault;
+      // Dispatch so dirty-tracking (and any listeners) see the change.
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
     });
   });
 
@@ -267,6 +261,73 @@
     });
     providerEl?.addEventListener("change", render);
     render();
+  });
+
+  // ---- info-icon popovers ----
+  // Field labels carry small ⓘ buttons rendered by the `infoIcon` template
+  // helper. A single shared popover follows whichever icon was clicked.
+  // Dismissal: same icon clicked again, Escape, or any click outside.
+  (() => {
+    const popover = document.createElement("div");
+    popover.className = "info-popover is-hidden";
+    document.body.appendChild(popover);
+    let activeAnchor = null;
+    const isOpen = () => !popover.classList.contains("is-hidden");
+    const hide = () => {
+      popover.classList.add("is-hidden");
+      activeAnchor = null;
+    };
+    const show = (btn) => {
+      activeAnchor = btn;
+      popover.textContent = btn.dataset.info || "";
+      popover.classList.remove("is-hidden");
+      const r = btn.getBoundingClientRect();
+      popover.style.top = (r.bottom + window.scrollY + 6) + "px";
+      popover.style.left = (r.left + window.scrollX) + "px";
+    };
+
+    // Toggle on icon click. preventDefault so the surrounding <label> doesn't
+    // also focus its input on the same click.
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest(".info-icon");
+      if (!btn) return;
+      e.preventDefault();
+      if (activeAnchor === btn && isOpen()) hide();
+      else show(btn);
+    });
+
+    // Outside-click dismissal. Runs in the capture phase so it fires before
+    // any descendant handler that might call stopPropagation on its own click.
+    document.addEventListener("click", (e) => {
+      if (!isOpen()) return;
+      if (e.target.closest(".info-icon") || e.target.closest(".info-popover")) return;
+      hide();
+    }, true);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && isOpen()) { hide(); return; }
+      // The icon is a <span role="button">, so keyboard activation isn't free.
+      if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("info-icon")) {
+        e.preventDefault();
+        e.target.click();
+      }
+    });
+    window.addEventListener("resize", hide);
+    window.addEventListener("scroll", hide, true);
+  })();
+
+  // ---- secret-input show/hide ----
+  // Click the small "Show"/"Hide" button inside a `.secret-input` wrapper to
+  // flip the contained <input> between type=password and type=text.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".secret-toggle");
+    if (!btn) return;
+    const input = btn.closest(".secret-input")?.querySelector("input");
+    if (!input) return;
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    btn.textContent = showing ? "Show" : "Hide";
+    btn.setAttribute("aria-label", showing ? "Show value" : "Hide value");
   });
 
   // ---- conditional sub-controls (data-show-when="<id-of-checkbox>") ----

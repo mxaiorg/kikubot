@@ -122,11 +122,41 @@ type agentForm struct {
 
 	// Render-only: full registry list (key + description) for the chip UI.
 	Registry []toolInfo `json:"-"`
-	// Render-only: defaults sourced from common.env (or its example fallback)
-	// so the JS coordinator-toggle can swap the textarea between them
-	// without losing user input.
-	SystemPromptDefault      string `json:"-"`
+	// Render-only: COORDINATOR_SYS_PROMPT default sourced from common.env (or
+	// its example fallback). Surfaced on the form so the "Paste Coordinator
+	// prompt" button can drop it into the system-prompt textarea.
 	CoordinatorPromptDefault string `json:"-"`
+	// Render-only: whether the respective API keys are defined in either the
+	// agent's env file or common.env. Drives the LLM-provider option-disable
+	// logic in the form so the user can't pick a provider whose key is missing.
+	HasAnthropicKey  bool `json:"-"`
+	HasOpenRouterKey bool `json:"-"`
+}
+
+// llmKeyAvailability reports whether ANTHROPIC_API_KEY and OPENROUTER_API_KEY
+// are defined (non-blank) in either the agent's env file or common.env. The
+// agent file takes precedence when looking up values; if `agentStem` is empty
+// (new agent), only common.env is consulted.
+func llmKeyAvailability(root, agentStem string) (anthropic, openrouter bool) {
+	common, _ := loadCommonEnv(root)
+	var agent *envFile
+	if agentStem != "" {
+		agent, _ = loadEnvFile(agentEnvPath(root, agentStem))
+	}
+	has := func(key string) bool {
+		if agent != nil {
+			if v, ok := agent.Get(key); ok && strings.TrimSpace(v) != "" {
+				return true
+			}
+		}
+		if common != nil {
+			if v, ok := common.Get(key); ok && strings.TrimSpace(v) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	return has("ANTHROPIC_API_KEY"), has("OPENROUTER_API_KEY")
 }
 
 // validate runs basic input checks.
@@ -436,9 +466,8 @@ const defaultSystemPrompt = `You are a helpful agent that serves two groups — 
 
 // commonPromptDefaults returns (SYSTEM_PROMPT, COORDINATOR_SYS_PROMPT) read
 // from configs/env/common.env with fallback to configs/env/examples/common.env.
-// SYSTEM_PROMPT falls back to the in-code defaultSystemPrompt so the value
-// matches what loadCommonDefaults uses to pre-populate the textarea — that
-// alignment is required for the coordinator-toggle swap-equality check in JS.
+// SYSTEM_PROMPT falls back to the in-code defaultSystemPrompt so callers
+// (e.g. loadCommonDefaults) get a usable seed even before common.env exists.
 func commonPromptDefaults(root string) (system, coordinator string) {
 	f, err := loadCommonEnv(root)
 	if err != nil {

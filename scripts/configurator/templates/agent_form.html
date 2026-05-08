@@ -8,14 +8,17 @@
 <form class="card" method="post" action="/agents/save" data-agent-form>
   <input type="hidden" name="original_stem" value="{{.OriginalStem}}">
   <div class="grid">
-    <label>Agent name (AGENT_NAME)
+    <label><span class="field-label">Agent name (AGENT_NAME) {{infoIcon "TBD"}}</span>
       <input name="name" value="{{.Name}}" required>
     </label>
-    <label>Agent email (AGENT_EMAIL)
+    <label><span class="field-label">Agent email (AGENT_EMAIL) {{infoIcon "TBD"}}</span>
       <input name="email" value="{{.Email}}" type="email" required placeholder="alpha@agents.example.com">
     </label>
-    <label class="full">Email password (EMAIL_PASSWORD)
-      <input name="email_password" value="{{.EmailPassword}}" type="password" autocomplete="new-password">
+    <label class="full"><span class="field-label">Email password (EMAIL_PASSWORD) {{infoIcon "TBD"}}</span>
+      <div class="secret-input">
+        <input name="email_password" value="{{.EmailPassword}}" type="password" autocomplete="new-password">
+        <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
+      </div>
     </label>
   </div>
 
@@ -23,11 +26,11 @@
     <legend>Access Control</legend>
     <p class="hint">Whitelist takes precedence; if a whitelist is set, blacklist is unavailable.</p>
     <div class="grid">
-      <label class="full">Whitelist (WHITELIST)
+      <label class="full"><span class="field-label">Whitelist (WHITELIST) {{infoIcon "TBD"}}</span>
         <input name="whitelist" id="agent-whitelist" value="{{.Whitelist}}" placeholder="example.com, agents.example.com">
         <small class="hint">Comma-separated domains (defined by no <code>@</code>) and email addresses.</small>
       </label>
-      <label class="full">Blacklist (BLACKLIST)
+      <label class="full"><span class="field-label">Blacklist (BLACKLIST) {{infoIcon "TBD"}}</span>
         <input name="blacklist" id="agent-blacklist" value="{{.Blacklist}}" placeholder="agents.example.com">
         <small class="hint">Disabled while a whitelist is set.</small>
       </label>
@@ -37,29 +40,29 @@
   <fieldset class="subcard">
     <legend>LLM</legend>
     <div class="grid">
-      <label>Provider (LLM_PROVIDER)
+      <label><span class="field-label">Provider (LLM_PROVIDER) {{infoIcon "TBD"}}</span>
         <select name="llm_provider" id="agent-provider">
-          <option value="anthropic" {{if eq .LLMProvider "anthropic"}}selected{{end}}>anthropic</option>
-          <option value="openrouter" {{if eq .LLMProvider "openrouter"}}selected{{end}}>openrouter</option>
+          <option value="anthropic" {{if eq .LLMProvider "anthropic"}}selected{{end}} {{if not .HasAnthropicKey}}disabled{{end}}>anthropic{{if not .HasAnthropicKey}} — ANTHROPIC_API_KEY missing{{end}}</option>
+          <option value="openrouter" {{if eq .LLMProvider "openrouter"}}selected{{end}} {{if not .HasOpenRouterKey}}disabled{{end}}>openrouter{{if not .HasOpenRouterKey}} — OPENROUTER_API_KEY missing{{end}}</option>
         </select>
       </label>
-      <label>Model (LLM_MODEL)
+      <label><span class="field-label">Model (LLM_MODEL) {{infoIcon "TBD"}}</span>
         <input name="llm_model" id="agent-model" value="{{.LLMModel}}" required>
         <small class="hint" data-provider-hint="anthropic">See <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener">Models overview</a>. Example: <code>claude-sonnet-4-6</code>.</small>
         <small class="hint" data-provider-hint="openrouter">See <a href="https://openrouter.ai/models" target="_blank" rel="noopener">openrouter.ai/models</a>. Example: <code>z-ai/glm-5.1</code>.</small>
       </label>
-      <label class="full" data-openrouter-only>Backup LLMs (LLM_OPENROUTER_BACKUP)
+      <label class="full" data-openrouter-only><span class="field-label">Backup LLMs (LLM_OPENROUTER_BACKUP) {{infoIcon "TBD"}}</span>
         <input name="llm_openrouter_backup" value="{{.LLMOpenrouterBackup}}" placeholder="openai/gpt-5.5, google/gemini-3.1-pro-preview">
         <small class="hint">Comma-separated fallback list, OpenRouter-only.</small>
       </label>
-      <div class="full" data-coordinator-toggle data-system-default="{{.SystemPromptDefault}}" data-coordinator-default="{{.CoordinatorPromptDefault}}">
-        <label class="checkbox">
-          <input type="checkbox" id="coordinator-toggle">
-          Coordinator agent (seed System prompt with <code>COORDINATOR_SYS_PROMPT</code>)
-        </label>
-        <label>System prompt (SYSTEM_PROMPT)
+      <div class="full" data-coordinator-toggle data-coordinator-default="{{.CoordinatorPromptDefault}}">
+        <label><span class="field-label">System prompt (SYSTEM_PROMPT) {{infoIcon "TBD"}}</span>
           <textarea name="system_prompt" id="system-prompt-textarea" rows="6" placeholder="Defaults to common.env SYSTEM_PROMPT">{{.SystemPrompt}}</textarea>
         </label>
+        <div class="actions">
+          <button type="button" class="ghost" id="paste-coordinator">Paste Coordinator prompt</button>
+          {{infoIcon "TBD"}}
+        </div>
       </div>
       {{/*
       <label class="checkbox">
@@ -71,17 +74,22 @@
   </fieldset>
 
   <fieldset class="subcard">
+    <legend>Knowledge</legend>
+    <p class="hint">Include additional common and agent specific knowledge in the knowledge directory. The knowledge directory holds common and per agent knowledge in Markdown format. Knowledge is loaded into the agent system prompt as context for the agent to use when answering questions. For more information see <code>configs/knowledge/README.md</code>.</p>
+  </fieldset>
+
+  <fieldset class="subcard">
     <legend>Roster Entry</legend>
     <p class="hint">How this agent is presented to its colleagues. Saved to <code>configs/agents.yaml</code>.</p>
     <div class="grid">
-      <label class="full">Role
+      <label class="full"><span class="field-label">Role {{infoIcon "TBD"}}</span>
         <input name="role" value="{{.Role}}" placeholder="Social Media, Web Searcher" required>
       </label>
-      <label class="full">Description
+      <label class="full"><span class="field-label">Description {{infoIcon "TBD"}}</span>
         <input name="role_description" value="{{.RoleDesc}}" placeholder="Creates and posts social media posts in draft form. Searches the web for relevant content." required>
       </label>
       <div class="full">
-        <label>Tools</label>
+        <label><span class="field-label">Tools {{infoIcon "TBD"}}</span></label>
         <div class="chips" data-chip-input data-tools="{{toolsDataAttr .Registry}}" data-provider-source="agent-provider">
           <div class="warn-banner is-hidden" data-tool-warning>⚠️ <code>anthropic_web_search</code> tool is not available for openrouter</div>
           <input type="hidden" name="tools" value="{{join .Tools ","}}">

@@ -111,7 +111,8 @@ func (s *server) handleAgentNew(w http.ResponseWriter, r *http.Request) {
 	}
 	a.ExcludeCollaborators = false
 	a.Registry, _ = loadToolRegistry(s.root)
-	a.SystemPromptDefault, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
+	_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
+	a.HasAnthropicKey, a.HasOpenRouterKey = llmKeyAvailability(s.root, "")
 	s.render(w, r, "agent_form", pageData{Active: "new", Data: a})
 }
 
@@ -128,7 +129,8 @@ func (s *server) handleAgentEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Registry, _ = loadToolRegistry(s.root)
-	a.SystemPromptDefault, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
+	_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
+	a.HasAnthropicKey, a.HasOpenRouterKey = llmKeyAvailability(s.root, stem)
 	s.render(w, r, "agent_form", pageData{Active: "list", Data: a})
 }
 
@@ -161,7 +163,8 @@ func (s *server) handleAgentSave(w http.ResponseWriter, r *http.Request) {
 		setFlash(w, "error", "Save failed: "+err.Error())
 		// Re-render the form with submitted values so the user doesn't lose input.
 		a.Registry, _ = loadToolRegistry(s.root)
-		a.SystemPromptDefault, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
+		_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
+		a.HasAnthropicKey, a.HasOpenRouterKey = llmKeyAvailability(s.root, a.OriginalStem)
 		s.render(w, r, "agent_form", pageData{Active: "new", Data: a, Flash: err.Error(), FlashKind: "error"})
 		return
 	}
@@ -238,6 +241,21 @@ var templateFuncs = template.FuncMap{
 	"joinCSV":       joinCSV,
 	"join":          strings.Join,
 	"toolsDataAttr": toolsDataAttr,
+	"infoIcon":      infoIcon,
+}
+
+// infoIcon renders a small clickable info marker that shows `text` in a popover
+// on click. Used to attach contextual help to form-field labels.
+//
+// Rendered as a <span role="button"> rather than a <button> on purpose: when
+// the icon lives inside a <label>, a real button would be the first labelable
+// descendant and the label would forward all of its clicks to the icon —
+// making the entire label row act as a click target for the popover. A span
+// is not labelable, so the label's implicit association falls through to the
+// input as intended.
+func infoIcon(text string) template.HTML {
+	esc := template.HTMLEscapeString(text)
+	return template.HTML(`<span class="info-icon" data-info="` + esc + `" role="button" tabindex="0" aria-label="Help">ⓘ</span>`)
 }
 
 // toolsDataAttr serializes the tool registry to a JSON object for the chip

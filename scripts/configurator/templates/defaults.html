@@ -7,31 +7,37 @@
 </header>
 <form class="card" method="post" action="/agents/defaults">
   <div class="grid">
-    <label>EMAIL_SERVER
+    <label><span class="field-label">EMAIL_SERVER {{infoIcon "TBD"}}</span>
       <input name="EMAIL_SERVER" value="{{.EmailServer}}" placeholder="mail-agents.example.com:993">
     </label>
-    <label>SMTP_SERVER
+    <label><span class="field-label">SMTP_SERVER {{infoIcon "TBD"}}</span>
       <input name="SMTP_SERVER" value="{{.SMTPServer}}" placeholder="mail-agents.example.com">
     </label>
-    <label>SMTP_PORT
+    <label><span class="field-label">SMTP_PORT {{infoIcon "TBD"}}</span>
       <input name="SMTP_PORT" value="{{.SMTPPort}}" placeholder="587">
     </label>
-    <label>AGENT_TIMEOUT (seconds)
+    <label><span class="field-label">AGENT_TIMEOUT (seconds) {{infoIcon "TBD"}}</span>
       <input name="AGENT_TIMEOUT" value="{{.AgentTimeout}}" placeholder="300">
     </label>
-    <label>MAX_HISTORY_CHARS
+    <label><span class="field-label">MAX_HISTORY_CHARS {{infoIcon "TBD"}}</span>
       <input name="MAX_HISTORY_CHARS" value="{{.MaxHistoryChars}}" placeholder="200000">
     </label>
-    <label>MAX_TOKENS
+    <label><span class="field-label">MAX_TOKENS {{infoIcon "TBD"}}</span>
       <input name="MAX_TOKENS" value="{{.MaxTokens}}" placeholder="6000">
     </label>
-    <label class="full">ANTHROPIC_API_KEY
-      <input type="password" name="ANTHROPIC_API_KEY" value="{{.AnthropicAPIKey}}" autocomplete="new-password">
+    <label class="full"><span class="field-label">ANTHROPIC_API_KEY {{infoIcon "TBD"}}</span>
+      <div class="secret-input">
+        <input type="password" name="ANTHROPIC_API_KEY" value="{{.AnthropicAPIKey}}" autocomplete="new-password">
+        <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
+      </div>
     </label>
-    <label class="full">OPENROUTER_API_KEY
-      <input type="password" name="OPENROUTER_API_KEY" value="{{.OpenRouterKey}}" autocomplete="new-password">
+    <label class="full"><span class="field-label">OPENROUTER_API_KEY {{infoIcon "TBD"}}</span>
+      <div class="secret-input">
+        <input type="password" name="OPENROUTER_API_KEY" value="{{.OpenRouterKey}}" autocomplete="new-password">
+        <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
+      </div>
     </label>
-    <label class="full">SYSTEM_PROMPT
+    <label class="full"><span class="field-label">SYSTEM_PROMPT {{infoIcon "TBD"}}</span>
       <textarea name="SYSTEM_PROMPT" rows="6">{{.SystemPrompt}}</textarea>
       <small class="hint">Tokens like <code>{{"{{coworkers}}"}}</code> are interpolated by kikubot at runtime.</small>
     </label>

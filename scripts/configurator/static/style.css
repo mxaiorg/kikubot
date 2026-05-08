@@ -226,6 +226,74 @@ button:disabled, button.primary:disabled {
 
 .is-hidden { display: none !important; }
 
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  user-select: none;
+}
+.info-icon:hover { color: var(--accent); }
+.info-icon:focus { outline: 1px dotted var(--accent); outline-offset: 1px; }
+
+.info-popover {
+  position: absolute;
+  z-index: 50;
+  max-width: 320px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  white-space: normal;
+}
+
+.error-hint {
+  color: var(--danger) !important;
+}
+
+.secret-input {
+  position: relative;
+  display: block;
+}
+.secret-input > input {
+  width: 100%;
+  padding-right: 60px;
+}
+.secret-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.secret-toggle:hover {
+  color: var(--accent);
+  background: var(--bg-elev-2);
+}
+
 .status-ok { color: var(--success); margin: 0 0 4px; }
 .status-bad { color: var(--danger); margin: 4px 0 0; }
 
