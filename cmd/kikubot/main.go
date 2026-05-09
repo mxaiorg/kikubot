@@ -48,6 +48,13 @@ func main() {
 
 	initAgent()
 
+	// Periodic prune of the Outlook Thread-Index fallback map. The index
+	// grows by one entry per Outlook-originated thread; pruning drops
+	// entries whose memory file no longer exists (e.g. operator cleanup).
+	pruneStop := make(chan struct{})
+	defer close(pruneStop)
+	services.StartThreadIndexPruner(pruneStop, 6*time.Hour)
+
 	// Primary event loop
 	process(ctx)
 
@@ -99,9 +106,19 @@ func process(parent context.Context) {
 				continue
 			}
 			var history []anthropic.MessageParam
+			// Resolve the thread root with Outlook Thread-Index fallback so
+			// Exchange-rewritten References don't orphan the inbound from
+			// its existing memory file. Falls back to email.GetThreadRoot()
+			// when no fingerprint matches, preserving behaviour for
+			// non-MS clients.
+			threadRoot, resolveErr := services.ResolveThreadRoot(&email)
+			if resolveErr != nil {
+				log.Println("error resolving thread root:", resolveErr)
+				continue
+			}
 			// Check the memory queue for each new message
 			// Based on the memory queue - load context for the agent
-			memory, memoryErr := services.GetMemory(email.GetThreadRoot())
+			memory, memoryErr := services.GetMemory(threadRoot)
 			if memoryErr != nil && !errors.Is(memoryErr, services.ErrMemoryNotFound) {
 				log.Println("error getting memory:", memoryErr)
 				continue
@@ -119,8 +136,23 @@ func process(parent context.Context) {
 				// No email history to use, create a new memory
 				if memory == nil {
 					memory = &services.Memory{
-						ThreadRoot: email.GetThreadRoot(),
+						ThreadRoot: threadRoot,
 					}
+				}
+			}
+
+			// Record the Outlook fingerprint for this thread so future
+			// replies with broken References can still find their way home.
+			// Subject changes mid-thread will register a new index entry,
+			// which is the right behaviour — a renamed conversation is
+			// only safe to merge when both signals agree.
+			if email.ThreadIndexConvID != "" {
+				subj := email.ThreadTopic
+				if subj == "" {
+					subj = email.Subject
+				}
+				if rememberErr := services.RememberThreadIndex(email.ThreadIndexConvID, subj, memory.ThreadRoot); rememberErr != nil {
+					log.Printf("warning: thread index remember failed: %v", rememberErr)
 				}
 			}
 
@@ -287,7 +319,11 @@ func handleAutoReply(ctx context.Context, email services.Email) {
 		log.Printf("auto-reply body excerpt:\n%s", excerpt)
 	}
 
-	rootId := email.GetThreadRoot()
+	rootId, resolveErr := services.ResolveThreadRoot(&email)
+	if resolveErr != nil {
+		log.Printf("auto-reply: thread root resolve error: %v; falling back to References-only", resolveErr)
+		rootId = email.GetThreadRoot()
+	}
 
 	// Walk References newest→oldest to find the most recent message that
 	// lives in this agent's INBOX — that's the email we received from our

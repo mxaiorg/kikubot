@@ -287,17 +287,29 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 		fromAddr = fmt.Sprintf("\"%s\" <%s>", config.AgentName, config.AgentEmail)
 	}
 
+	// Outlook conversation propagation. When the inbound that triggered
+	// this turn carries a Thread-Index, echo the conversation prefix on
+	// the outbound so MS clients downstream keep threading. Sourced from
+	// ctx (trusted) — never from LLM input.
+	var threadIndexConvID, threadTopic string
+	if srcEmail != nil {
+		threadIndexConvID = srcEmail.ThreadIndexConvID
+		threadTopic = srcEmail.ThreadTopic
+	}
+
 	msg := services.Email{
-		To:          toRecipients,
-		From:        fromAddr,
-		Cc:          ccRecipients,
-		Date:        time.Now(),
-		References:  references,
-		InReplyTo:   inReplyTo, // see note above
-		Senders:     senders,
-		Subject:     subject,
-		Content:     content,
-		Attachments: attachments,
+		To:                toRecipients,
+		From:              fromAddr,
+		Cc:                ccRecipients,
+		Date:              time.Now(),
+		References:        references,
+		InReplyTo:         inReplyTo, // see note above
+		Senders:           senders,
+		Subject:           subject,
+		Content:           content,
+		Attachments:       attachments,
+		ThreadIndexConvID: threadIndexConvID,
+		ThreadTopic:       threadTopic,
 	}
 
 	err := services.SendEmail(ctx, msg)

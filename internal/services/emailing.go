@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -59,6 +60,15 @@ type Email struct {
 	Content       string       `json:"content,omitempty"`
 	Attachments   []Attachment `json:"attachments,omitempty"`
 	AutoSubmitted string       `json:"autoSubmitted,omitempty"` // RFC 3834; "auto-replied" on bounces
+
+	// Outlook/Exchange threading (empty for non-MS clients). ConvID is the
+	// 22-byte conversation prefix of Thread-Index, hex-encoded — stable
+	// across replies even when Exchange rewrites or drops References.
+	// ThreadTopic is the normalised subject set by Outlook on conversation
+	// start. We use these as a fallback thread key, gated on a normalised-
+	// subject match, when References lookup misses.
+	ThreadIndexConvID string `json:"threadIndexConvID,omitempty"`
+	ThreadTopic       string `json:"threadTopic,omitempty"`
 }
 
 // sourceEmailKey is the unexported context key under which the inbound email
@@ -464,6 +474,8 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName) (*Email,
 	email.References = parseReferences(header.Get("References"))
 	email.InReplyTo = header.Get("In-Reply-To")
 	email.AutoSubmitted = strings.TrimSpace(header.Get("Auto-Submitted"))
+	email.ThreadIndexConvID = decodeThreadIndexConvID(header.Get("Thread-Index"))
+	email.ThreadTopic = strings.TrimSpace(header.Get("Thread-Topic"))
 
 	var fromAddress string
 	if fromAddrs, err := header.AddressList("From"); err == nil && len(fromAddrs) > 0 {
@@ -729,6 +741,50 @@ func parseReferences(refs string) []string {
 	return result
 }
 
+// decodeThreadIndexConvID returns the hex-encoded 22-byte conversation
+// prefix of an Outlook/Exchange Thread-Index header, or "" if the header
+// is missing or malformed. The remainder of the header (5-byte child
+// blocks per reply) is discarded — we key on the conversation, not the
+// position within it.
+func decodeThreadIndexConvID(h string) string {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(h)
+	if err != nil || len(raw) < 22 {
+		return ""
+	}
+	return fmt.Sprintf("%x", raw[:22])
+}
+
+// replyPrefixRe matches a single localized reply/forward prefix at the
+// start of a subject. Covers EN, DE, FR, IT, ES, PT, NL, NO/DA, SE, FI,
+// PL, plus CJK languages (ZH, JA, KO), numbered variants like "Re[2]:",
+// and bracketed admin tags "[EXT]"/"[EXTERNAL]".
+var replyPrefixRe = regexp.MustCompile(
+	`(?i)^\s*(?:` +
+		`\[(?:ext|external|extern)\]|` +
+		`(?:re|aw|fwd?|wg|tr|sv|vs|rif|r|rv|ant|vl|odp|pd|回复|答复|转发|回覆|轉寄|返信|転送|회신|답장|전달)` +
+		`(?:\[\d+\])?\s*[:：]` +
+		`)\s*`)
+
+// NormalizeSubject strips leading reply/forward prefixes (repeatedly),
+// collapses internal whitespace, and lowercases. Used as a corroborating
+// signal when matching threads by Outlook Thread-Index — the conversation
+// fingerprint matches *and* humans agree it's the same conversation.
+func NormalizeSubject(s string) string {
+	s = strings.TrimSpace(s)
+	for {
+		next := replyPrefixRe.ReplaceAllString(s, "")
+		if next == s {
+			break
+		}
+		s = next
+	}
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
 func parseSenders(senders string) []string {
 	if senders == "" {
 		return nil
@@ -803,6 +859,20 @@ func SendEmail(ctx context.Context, msg Email) error {
 
 	if msg.AutoSubmitted != "" {
 		m.SetHeader("Auto-Submitted", msg.AutoSubmitted)
+	}
+
+	// Echo Outlook conversation headers so MS clients in the audience keep
+	// the message stitched into the existing thread view. We only repeat
+	// the 22-byte conversation prefix; appending a child block would
+	// require carrying byte offsets per reply, and Outlook is happy to
+	// thread on the prefix alone.
+	if msg.ThreadIndexConvID != "" {
+		if raw, err := hex.DecodeString(msg.ThreadIndexConvID); err == nil && len(raw) == 22 {
+			m.SetHeader("Thread-Index", base64.StdEncoding.EncodeToString(raw))
+		}
+	}
+	if msg.ThreadTopic != "" {
+		m.SetHeader("Thread-Topic", msg.ThreadTopic)
 	}
 
 	m.SetBody("text/plain", msg.Content)
