@@ -13,7 +13,7 @@
 
 > **Disclaimer.** This repository is a public mirror of an internally developed project. It is provided as-is for community use and learning. We do not guarantee response times on issues or PRs, and development priorities are driven by internal needs. Contributions are welcome but may not be merged.
 
-> **Note.** This project is in active development. Compatibility with microsoft based emails (e.g., Office 365) are not yet fully tested.
+> **Note.** This project is in active development. Compatibility with microsoft based emails (e.g., Office 365) is not yet fully tested.
 
 ## Overview
 
