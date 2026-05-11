@@ -7,37 +7,34 @@
 </header>
 <form class="card" method="post" action="/agents/defaults">
   <div class="grid">
-    <label><span class="field-label">EMAIL_SERVER {{infoIcon "TBD"}}</span>
+    <label><span class="field-label">EMAIL_SERVER {{infoIcon "The IMAP email server and port where the agent’s email account is hosted."}}</span>
       <input name="EMAIL_SERVER" value="{{.EmailServer}}" placeholder="mail-agents.example.com:993">
     </label>
-    <label><span class="field-label">SMTP_SERVER {{infoIcon "TBD"}}</span>
-      <input name="SMTP_SERVER" value="{{.SMTPServer}}" placeholder="mail-agents.example.com">
+    <label><span class="field-label">SMTP_SERVER {{infoIcon "The SMTP server and port to be used to send email. If port is omitted, the default (587) will be used."}}</span>
+      <input name="SMTP_SERVER" value="{{.SMTPServer}}" placeholder="mail-agents.example.com:587">
     </label>
-    <label><span class="field-label">SMTP_PORT {{infoIcon "TBD"}}</span>
-      <input name="SMTP_PORT" value="{{.SMTPPort}}" placeholder="587">
-    </label>
-    <label><span class="field-label">AGENT_TIMEOUT (seconds) {{infoIcon "TBD"}}</span>
+    <label><span class="field-label">AGENT_TIMEOUT (seconds) {{infoIcon "How long an agent will process an email before giving up and informing the user."}}</span>
       <input name="AGENT_TIMEOUT" value="{{.AgentTimeout}}" placeholder="300">
     </label>
-    <label><span class="field-label">MAX_HISTORY_CHARS {{infoIcon "TBD"}}</span>
+    <label><span class="field-label">MAX_HISTORY_CHARS {{infoIcon "Max characters of prior conversation kept per turn. Older messages are trimmed when exceeded; the anchor (most recent human message) is always preserved. Higher = more context, more cost. Default 50,000."}}</span>
       <input name="MAX_HISTORY_CHARS" value="{{.MaxHistoryChars}}" placeholder="200000">
     </label>
     <label><span class="field-label">MAX_TOKENS {{infoIcon "TBD"}}</span>
       <input name="MAX_TOKENS" value="{{.MaxTokens}}" placeholder="6000">
     </label>
-    <label class="full"><span class="field-label">ANTHROPIC_API_KEY {{infoIcon "TBD"}}</span>
+    <label class="full"><span class="field-label">ANTHROPIC_API_KEY {{infoIcon "Anthropic API Key"}}</span>
       <div class="secret-input">
         <input type="password" name="ANTHROPIC_API_KEY" value="{{.AnthropicAPIKey}}" autocomplete="new-password">
         <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
       </div>
     </label>
-    <label class="full"><span class="field-label">OPENROUTER_API_KEY {{infoIcon "TBD"}}</span>
+    <label class="full"><span class="field-label">OPENROUTER_API_KEY {{infoIcon "OpenRouter API Key"}}</span>
       <div class="secret-input">
         <input type="password" name="OPENROUTER_API_KEY" value="{{.OpenRouterKey}}" autocomplete="new-password">
         <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
       </div>
     </label>
-    <label class="full"><span class="field-label">SYSTEM_PROMPT {{infoIcon "TBD"}}</span>
+    <label class="full"><span class="field-label">SYSTEM_PROMPT {{infoIcon "The default base system prompt used by the agent. The `{{coworkers}}` variable will be filled at runtime with the roster of agents pulled from `agents.yaml`. The final system prompt will include additional context provided by tools and knowledge."}}</span>
       <textarea name="SYSTEM_PROMPT" rows="6">{{.SystemPrompt}}</textarea>
       <small class="hint">Tokens like <code>{{"{{coworkers}}"}}</code> are interpolated by kikubot at runtime.</small>
     </label>

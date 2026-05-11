@@ -144,7 +144,7 @@ Common settings:
 
 | Variable | Purpose |
 |---|---|
-| `EMAIL_SERVER`, `SMTP_SERVER`, `SMTP_PORT` | IMAP / SMTP endpoints. |
+| `EMAIL_SERVER`, `SMTP_SERVER` | IMAP / SMTP endpoints (both `host:port`; SMTP port defaults to 587 if omitted). |
 | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` | LLM credentials. |
 | `MAX_HISTORY_CHARS`, `MAX_TOKENS`, `MAX_TURNS` | Conversation budgets. |
 | `AGENT_TIMEOUT` | Per-message deadline (seconds). |

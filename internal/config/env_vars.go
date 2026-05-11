@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -18,9 +19,9 @@ var (
 	AgentEmails         map[string]bool
 	EmailPassword       = ""
 	EmailServer         = "" // IMAP host:port
-	SmtpServer          = ""
+	SmtpServer          = "" // SMTP host (port stripped from SMTP_SERVER)
 	SmtpHelo            = "" // EHLO/HELO hostname for SMTP
-	SmtpPort            int
+	SmtpPort            int  // SMTP port (parsed from SMTP_SERVER, defaults to 587)
 	AllowedRcpt         []string
 	Whitelist           []string
 	Blacklist           []string
@@ -68,7 +69,20 @@ func LoadEnv() {
 	AgentEmail = os.Getenv("AGENT_EMAIL")
 	EmailPassword = os.Getenv("EMAIL_PASSWORD")
 	EmailServer = os.Getenv("EMAIL_SERVER")
-	SmtpServer = os.Getenv("SMTP_SERVER")
+	// SMTP_SERVER may be either "host" or "host:port" (consistent with EMAIL_SERVER).
+	// When the port is omitted we default to 587.
+	smtpRaw := os.Getenv("SMTP_SERVER")
+	SmtpPort = 587
+	if smtpRaw != "" {
+		if host, portStr, splitErr := net.SplitHostPort(smtpRaw); splitErr == nil {
+			SmtpServer = host
+			if p, parsePortErr := strconv.Atoi(portStr); parsePortErr == nil && p > 0 {
+				SmtpPort = p
+			}
+		} else {
+			SmtpServer = smtpRaw
+		}
+	}
 	if InContainer {
 		if strings.HasPrefix(EmailServer, "localhost:") {
 			EmailServer = "host.docker.internal:993"
@@ -81,7 +95,6 @@ func LoadEnv() {
 	if SmtpHelo == "" {
 		SmtpHelo = "localhost.localdomain"
 	}
-	SmtpPort, _ = strconv.Atoi(os.Getenv("SMTP_PORT"))
 	allowedRcptEnv := os.Getenv("ALLOWED_RCPT")
 	if allowedRcptEnv != "" {
 		parts := splitRegexp.Split(allowedRcptEnv, -1)

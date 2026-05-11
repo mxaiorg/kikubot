@@ -401,7 +401,6 @@ func ensureCoworkers(s string) string {
 type commonDefaults struct {
 	EmailServer     string
 	SMTPServer      string
-	SMTPPort        string
 	MaxHistoryChars string
 	MaxTokens       string
 	AnthropicAPIKey string
@@ -414,7 +413,6 @@ func (d *commonDefaults) populateFromEnv(f *envFile) {
 	get := func(k string) string { v, _ := f.Get(k); return v }
 	d.EmailServer = get("EMAIL_SERVER")
 	d.SMTPServer = get("SMTP_SERVER")
-	d.SMTPPort = get("SMTP_PORT")
 	d.MaxHistoryChars = get("MAX_HISTORY_CHARS")
 	d.MaxTokens = get("MAX_TOKENS")
 	d.AnthropicAPIKey = get("ANTHROPIC_API_KEY")
@@ -435,7 +433,6 @@ func (d *commonDefaults) applyTo(f *envFile) {
 	}
 	setOrLeave("EMAIL_SERVER", d.EmailServer)
 	setOrLeave("SMTP_SERVER", d.SMTPServer)
-	setOrLeave("SMTP_PORT", d.SMTPPort)
 	setOrLeave("MAX_HISTORY_CHARS", d.MaxHistoryChars)
 	setOrLeave("MAX_TOKENS", d.MaxTokens)
 	setOrLeave("ANTHROPIC_API_KEY", d.AnthropicAPIKey)
@@ -490,9 +487,6 @@ func loadCommonDefaults(root string) (*commonDefaults, error) {
 	}
 	d := &commonDefaults{}
 	d.populateFromEnv(f)
-	if d.SMTPPort == "" {
-		d.SMTPPort = "587"
-	}
 	if d.MaxHistoryChars == "" {
 		d.MaxHistoryChars = "200000"
 	}

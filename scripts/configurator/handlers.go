@@ -74,7 +74,6 @@ func (s *server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 		d := &commonDefaults{
 			EmailServer:     r.FormValue("EMAIL_SERVER"),
 			SMTPServer:      r.FormValue("SMTP_SERVER"),
-			SMTPPort:        r.FormValue("SMTP_PORT"),
 			MaxHistoryChars: r.FormValue("MAX_HISTORY_CHARS"),
 			MaxTokens:       r.FormValue("MAX_TOKENS"),
 			AnthropicAPIKey: r.FormValue("ANTHROPIC_API_KEY"),
