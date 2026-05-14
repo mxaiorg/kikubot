@@ -8,10 +8,10 @@
 <form class="card" method="post" action="/agents/defaults">
   <div class="grid">
     <label><span class="field-label">EMAIL_SERVER {{infoIcon "The IMAP email server and port where the agent’s email account is hosted."}}</span>
-      <input name="EMAIL_SERVER" value="{{.EmailServer}}" placeholder="mail-agents.example.com:993">
+      <input name="EMAIL_SERVER" value="{{.EmailServer}}" placeholder="mail.agents.example.com:993">
     </label>
     <label><span class="field-label">SMTP_SERVER {{infoIcon "The SMTP server and port to be used to send email. If port is omitted, the default (587) will be used."}}</span>
-      <input name="SMTP_SERVER" value="{{.SMTPServer}}" placeholder="mail-agents.example.com:587">
+      <input name="SMTP_SERVER" value="{{.SMTPServer}}" placeholder="mail.agents.example.com:587">
     </label>
     <label><span class="field-label">AGENT_TIMEOUT (seconds) {{infoIcon "How long an agent will process an email before giving up and informing the user."}}</span>
       <input name="AGENT_TIMEOUT" value="{{.AgentTimeout}}" placeholder="300">

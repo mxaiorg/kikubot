@@ -4,7 +4,7 @@ services:
     container_name: dms
     restart: unless-stopped
 #    Change the hostname and domainname to match your case
-    hostname: mail-agents.example.com
+    hostname: mail.agents.example.com
     domainname: agents.example.com
 
     ports:

@@ -18,7 +18,7 @@ Edit the `docker-compose.yml` file to configure the email domain:
 
 ```dockerfile
 #   Change the hostname and domainname to match your case
-    hostname: mail-agents.example.com
+    hostname: mail.agents.example.com
     domainname: agents.example.com
 ```
 
