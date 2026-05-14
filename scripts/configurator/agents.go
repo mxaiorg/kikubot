@@ -340,6 +340,11 @@ func (a *agentForm) save(root string) (newStem string, err error) {
 	if err := upsertRoster(root, a); err != nil {
 		return stem, fmt.Errorf("env saved but roster update failed: %w", err)
 	}
+	// Regenerate docker-compose.yml at the project root so the running set of
+	// services matches the current configs/env/<stem>.env files.
+	if err := regenerateCompose(root); err != nil {
+		return stem, fmt.Errorf("env and roster saved but docker-compose.yml update failed: %w", err)
+	}
 	return stem, nil
 }
 

@@ -57,7 +57,8 @@
         <p class="status-ok">✅ fullchain.pem found</p>
         <p class="status-ok">✅ privkey.pem found</p>
       {{else}}
-        <p class="hint">Provide your agent email domain's private key and full certificate chain. Replace <code>services/dms/certs/fullchain-update.pem</code> and <code>services/dms/certs/privkey-update.pem</code> with your certificate, then save them as <code>fullchain.pem</code> and <code>privkey.pem</code> respectively.</p>
+        <p class="hint">Provide your agent email domain's private key and full certificate chain. Replace <code>services/dms/certs/fullchain-update.pem</code> and <code>services/dms/certs/privkey-update.pem</code> with your certificate, then save them as <code>fullchain.pem</code> and <code>privkey.pem</code> respectively. </p>
+        <p class="hint">For instructions on how to create and use a self-signed certificate see `services/dms/README.md`</p>
         {{if not .SSL.FullchainExists}}<p class="status-bad">❌ fullchain.pem not found</p>{{end}}
         {{if not .SSL.PrivkeyExists}}<p class="status-bad">❌ privkey.pem not found</p>{{end}}
       {{end}}

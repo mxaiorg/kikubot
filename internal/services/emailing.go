@@ -1107,7 +1107,10 @@ func dialServer(ctx context.Context) (*client.Client, error) {
 
 	// Wrap the raw connection with TLS. HandshakeContext respects
 	// context cancellation so Ctrl-C can interrupt the handshake.
-	tlsConn := tls.Client(rawConn, &tls.Config{ServerName: host})
+	tlsConn := tls.Client(rawConn, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: config.EmailInsecureTLS,
+	})
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		rawConn.Close()
 		return nil, fmt.Errorf("TLS handshake: %w", err)

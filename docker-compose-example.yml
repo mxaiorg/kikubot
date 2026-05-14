@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
     volumes:
       - ./data/kiku:/app/data
 
@@ -23,6 +24,7 @@ services:
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
+#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
 #    volumes:
 #      - ./data/beta:/app/data
 #
@@ -36,6 +38,7 @@ services:
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
+#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
 #    volumes:
 #      - ./data/gamma:/app/data
 #
@@ -49,5 +52,6 @@ services:
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
+#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
 #    volumes:
 #      - ./data/delta:/app/data

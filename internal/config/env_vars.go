@@ -19,6 +19,7 @@ var (
 	AgentEmails         map[string]bool
 	EmailPassword       = ""
 	EmailServer         = "" // IMAP host:port
+	EmailInsecureTLS    bool // skip IMAP TLS verification (self-signed certs in dev)
 	SmtpServer          = "" // SMTP host (port stripped from SMTP_SERVER)
 	SmtpHelo            = "" // EHLO/HELO hostname for SMTP
 	SmtpPort            int  // SMTP port (parsed from SMTP_SERVER, defaults to 587)
@@ -69,6 +70,10 @@ func LoadEnv() {
 	AgentEmail = os.Getenv("AGENT_EMAIL")
 	EmailPassword = os.Getenv("EMAIL_PASSWORD")
 	EmailServer = os.Getenv("EMAIL_SERVER")
+	switch strings.ToLower(os.Getenv("EMAIL_INSECURE_TLS")) {
+	case "1", "true", "yes":
+		EmailInsecureTLS = true
+	}
 	// SMTP_SERVER may be either "host" or "host:port" (consistent with EMAIL_SERVER).
 	// When the port is omitted we default to 587.
 	smtpRaw := os.Getenv("SMTP_SERVER")
