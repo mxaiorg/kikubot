@@ -8,6 +8,25 @@ import (
 	"strings"
 )
 
+// emailServerHost reads EMAIL_SERVER from common.env (falling back to the
+// example) and returns just the hostname portion (port stripped). Returns
+// a placeholder if neither file defines it.
+func emailServerHost(root string) string {
+	f, err := loadCommonEnv(root)
+	if err != nil || f == nil {
+		return "mail.agents.example.com"
+	}
+	v, _ := f.Get("EMAIL_SERVER")
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "mail.agents.example.com"
+	}
+	if i := strings.LastIndex(v, ":"); i > 0 {
+		v = v[:i]
+	}
+	return v
+}
+
 // composePath is the live docker-compose.yml at the project root. The
 // configurator regenerates this file from the list of agents in
 // configs/env/<stem>.env whenever an agent is saved.
@@ -58,6 +77,9 @@ func regenerateCompose(root string) error {
 		Key  string
 		Stem string
 	}
+	// Email server host (without port) for the optional host-gateway entry.
+	emailHost := emailServerHost(root)
+
 	svcs := make([]svc, 0, len(agents))
 	used := map[string]int{}
 	for _, a := range agents {
@@ -86,6 +108,7 @@ func regenerateCompose(root string) error {
 		b.WriteString("    restart: unless-stopped\n")
 		b.WriteString("    extra_hosts:\n")
 		b.WriteString("      - \"host.docker.internal:host-gateway\"\n")
+		fmt.Fprintf(&b, "#      - \"%s:host-gateway\" # optional for localhost email server\n", emailHost)
 		b.WriteString("    volumes:\n")
 		fmt.Fprintf(&b, "      - ./data/%s:/app/data\n", s.Stem)
 	}

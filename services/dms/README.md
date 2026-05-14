@@ -55,8 +55,24 @@ docker rm -f dms && docker compose up --force-recreate
 
 ```bash
 # TESTING
-openssl s_client -connect agents.mxhero.com:993 -quiet
+openssl s_client -connect mail.agents.example.com:993 -quiet
 ```
+
+## Using Self signed certificates
+
+To generate a self signed certificate,
+
+```bash
+cd services/dms
+mkdir -p ./certs
+# Replace the CN and subjectAltName with your own
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+  -keyout ./certs/privkey.pem \
+  -out   ./certs/fullchain.pem \
+  -subj  "/CN=mail.agents.example.com" \
+  -addext "subjectAltName=DNS:mail.agents.example.com,DNS:agents.example.com"
+```
+⚠️ Set the environment variable `EMAIL_INSECURE_TLS=true` in `configs/env/common.env`
 
 ## Log analysis
 
