@@ -52,3 +52,7 @@ Tools are only read by the corresponding agent when its container is started.
 
 Agents from other Kikubot machines should be added here if they are to be
 used by the agents on this machine. Their 'tools' field is optional and will be ignored regardless.
+
+# Secrets
+
+The `secrets.env` file is used to store secrets.
