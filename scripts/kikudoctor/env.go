@@ -1,70 +1,102 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// validateEnvFiles checks configs/env: common.env presence and that any
-// per-agent <stem>.env file matches an agent's email account.
-func validateEnvFiles(root string, af *AgentsFile, r *Report) {
-	envDir := filepath.Join(root, "configs", "env")
-	sec := r.Section(fmt.Sprintf("env files (%s)", relPath(root, envDir)))
+// validateSecrets verifies that configs/secrets.env exists and provides at
+// least one of ANTHROPIC_API_KEY / OPENROUTER_API_KEY, plus a mailbox
+// password for every locally-deployed agent.
+//
+// Missing per-tool credentials are intentionally not validated here — the
+// operator may legitimately leave them blank for tools they don't use. Only
+// the LLM keys and mailbox passwords are required to boot.
+func validateSecrets(root string, af *AgentsFile, localAccounts map[string]bool, r *Report) {
+	path := filepath.Join(root, "configs", "secrets.env")
+	sec := r.Section(fmt.Sprintf("secrets.env (%s)", relPath(root, path)))
 
-	commonPath := filepath.Join(envDir, "common.env")
-	if _, err := os.Stat(commonPath); err != nil {
+	values, err := readEnvFile(path)
+	if err != nil {
 		if os.IsNotExist(err) {
-			sec.Fail("common.env is missing")
+			sec.Fail("file is missing — copy configs/secrets-example.env and fill in")
 		} else {
-			sec.Fail("cannot stat common.env: %v", err)
+			sec.Fail("cannot read file: %v", err)
 		}
-	} else {
-		sec.Pass("common.env exists")
+		return
+	}
+	sec.Pass("file exists")
+
+	hasAnthropic := strings.TrimSpace(values["ANTHROPIC_API_KEY"]) != ""
+	hasOpenRouter := strings.TrimSpace(values["OPENROUTER_API_KEY"]) != ""
+	switch {
+	case hasAnthropic && hasOpenRouter:
+		sec.Pass("ANTHROPIC_API_KEY and OPENROUTER_API_KEY are set")
+	case hasAnthropic:
+		sec.Pass("ANTHROPIC_API_KEY is set")
+	case hasOpenRouter:
+		sec.Pass("OPENROUTER_API_KEY is set")
+	default:
+		sec.Fail("neither ANTHROPIC_API_KEY nor OPENROUTER_API_KEY is set — at least one is required")
 	}
 
-	entries, err := os.ReadDir(envDir)
-	if err != nil {
-		sec.Fail("cannot read env directory: %v", err)
+	if af == nil {
 		return
 	}
 
-	accounts := map[string]string{}
-	if af != nil {
-		for _, a := range af.Agents {
-			acct := emailAccount(a.Email)
-			if acct == "" {
-				continue
-			}
-			accounts[acct] = a.Email
+	// Mailbox password presence per locally-deployed agent.
+	missing := 0
+	checked := 0
+	for _, a := range af.Agents {
+		acct := emailAccount(a.Email)
+		if acct == "" {
+			continue
+		}
+		if len(localAccounts) > 0 && !localAccounts[acct] {
+			continue // not deployed on this machine
+		}
+		checked++
+		key := strings.ToUpper(acct) + "_EMAIL_PASSWORD"
+		if strings.TrimSpace(values[key]) == "" {
+			sec.Fail("%s is empty (required for agent %s)", key, a.Email)
+			missing++
 		}
 	}
+	if checked > 0 && missing == 0 {
+		sec.Pass("mailbox password set for all %d locally-deployed agent(s)", checked)
+	}
+}
 
-	bad := 0
-	matched := 0
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".env") {
-			continue
-		}
-		stem := strings.ToLower(strings.TrimSuffix(name, ".env"))
-		if stem == "common" {
-			continue
-		}
-		if _, ok := accounts[stem]; !ok {
-			sec.Fail("%s does not match any agent email account in agents.yaml", name)
-			bad++
-		} else {
-			matched++
-		}
+// readEnvFile is a minimal .env parser: KEY=VALUE per line, # comments and
+// surrounding quotes stripped from values. Sufficient to spot-check secrets
+// presence — we do not interpret backslash escapes or multi-line values.
+func readEnvFile(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
-	if bad == 0 && matched > 0 {
-		sec.Pass("%d agent-specific env file(s) match agent email accounts", matched)
-	} else if bad == 0 && matched == 0 {
-		sec.Pass("no agent-specific env files present (allowed)")
+	defer f.Close()
+	out := map[string]string{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		eq := strings.Index(line, "=")
+		if eq <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eq])
+		val := strings.TrimSpace(line[eq+1:])
+		val = strings.Trim(val, `"'`)
+		out[key] = val
 	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

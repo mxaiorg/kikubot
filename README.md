@@ -60,7 +60,7 @@ This project is based on the research of mxHERO Labs. See our [blog post](https:
                                                       Box, Tika
 ```
 
-Each agent container runs an identical Go binary, parameterised by environment variables and a shared `agents.yaml` roster.
+Each agent container runs an identical Go binary, parameterised by a shared `configs/agents.yaml` (roster + common defaults + per-agent overrides) and a shared `configs/secrets.env` (API keys + per-agent mailbox passwords). The container picks its identity from the `AGENT_EMAIL` env var injected by docker-compose.
 
 ## Prerequisites
 
@@ -80,21 +80,22 @@ Each agent container runs an identical Go binary, parameterised by environment v
 git clone https://github.com/mxaiorg/kikubot
 cd kikubot
 
-# 1. Configure the agent roster and per-agent env files (see "Configuration").
-cp configs/agents-example.yaml     configs/agents.yaml
-cp configs/env/examples/common.env configs/env/common.env
-cp configs/env/examples/kiku.env   configs/env/kiku.env
-# Edit configs/agents.yaml to match the agents you want to run, then edit the
-# env files: set EMAIL_PASSWORD, ANTHROPIC_API_KEY (or OPENROUTER_API_KEY),
-# WHITELIST, etc.
+# 1. Configure the roster + common defaults.
+cp configs/agents-example.yaml   configs/agents.yaml
+cp configs/secrets-example.env   configs/secrets.env
+# Edit configs/agents.yaml: keep/edit the common: defaults (mail server,
+# prompts, budgets) and the agents: entries (identity, role, tools, optional
+# per-agent overrides). Then edit configs/secrets.env: fill in
+# ANTHROPIC_API_KEY (or OPENROUTER_API_KEY) and one
+# <UPPERCASED_LOCAL_PART>_EMAIL_PASSWORD per agent, plus any tool credentials.
 
 # 2. (Optional) Drop knowledge files into configs/knowledge/<agent>/*.md
 
-# 3. Edit the docker-compose.yml to match your environment.
-cp docker-compose.yml.example docker-compose.yml
-#    - Set the service (agent) names to reflect your agents.yaml.
-#    - Set the environment and volume mounts to match your agent specific env files
-#      and data folder
+# 3. Edit docker-compose.yml to match your roster.
+cp docker-compose-example.yml docker-compose.yml
+#    - One service per agent. Each service sets AGENT_EMAIL in `environment:`
+#      and points env_file at configs/secrets.env.
+#    - Volume mount: ./data/<stem>:/app/data (stem = lowercased local-part).
 
 # 4. Validate.
 go run scripts/kikudoctor/*.go
@@ -113,54 +114,62 @@ docker compose logs -f
 
 ## Configuration
 
-### Agent roster — `configs/agents.yaml`
+### Deployment config — `configs/agents.yaml`
 
-Start from configs/agents-example.yaml and edit to your deployment — configs/agents.yaml is what the running container reads.
-
-Defines every agent on the network. Each running container looks itself up by `AGENT_EMAIL` and uses everyone else as the "coworkers" list injected into its system prompt. `agents.yaml` is how each agent becomes aware of the others. If you deploy Kikubots across multiple machines and you want agents to interact between machines, be sure to include those agents in the `agents.yaml` roster of each installation.
+`configs/agents.yaml` is the single source of truth for non-secret deployment config. It has two sections:
 
 ```yaml
+common:
+  email_server: mail.agents.example.com:993
+  smtp_server: mail.agents.example.com:587
+  email_insecure_tls: false
+  max_history_chars: 200000
+  max_tokens: 6000
+  agent_timeout: 300
+  max_turns: 20
+  system_prompt: |
+    You are a helpful agent...
+    {{coworkers}}
+  coordinator_system_prompt: |
+    You are a helpful Coordenator Agent...
+    {{coworkers}}
+
 agents:
   - name: Kiku
     email: kiku@agents.example.com
-    role: "Coordinator"
-    description: "Communicates with users. Coordinates other agents."
+    role: Coordinator
+    description: Communicates with users. Coordinates other agents.
     tools: [report, snooze, tavily_mcp]
+    # Any common: field may be overridden here.
+    llm_provider: openrouter
+    llm_model: anthropic/claude-sonnet-4.6
+    max_turns: 40
+    whitelist: [example.com, agents.example.com]
 
   - name: Beta
     email: beta@agents.example.com
-    role: "CRM, Email Archivist"
-    description: "Manages Salesforce and access to the company email record."
+    role: CRM, Email Archivist
+    description: Manages Salesforce and access to the company email record.
     tools: [mxmcp, salesforce_mcp]
 ```
 
-Tool keys are defined in [`internal/tools/registry.go`](internal/tools/registry.go).
+The runtime selects its identity from the `AGENT_EMAIL` environment variable (injected per-service in docker-compose). It then merges the `common:` block with that agent's overrides, and JSON-formats every other agent into the `{{coworkers}}` block of the system prompt.
 
-### Environment files — `configs/env/`
+If you deploy Kikubots across multiple machines and want agents to interact between hosts, include those agents in each installation's `agents.yaml`.
 
-`common.env` is shared by every container; per-agent files (e.g. `kiku.env`) override individual variables. Examples are in `configs/env/examples/`.
+Tool keys are defined in [`internal/tools/registry.go`](internal/tools/registry.go). Whitelist mode is strict (every immediate sender must match). Blacklist mode is lenient (walks the full thread to catch hidden bad actors).
 
-Common settings:
+### Secrets — `configs/secrets.env`
 
-| Variable | Purpose |
-|---|---|
-| `EMAIL_SERVER`, `SMTP_SERVER` | IMAP / SMTP endpoints (both `host:port`; SMTP port defaults to 587 if omitted). |
-| `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` | LLM credentials. |
-| `MAX_HISTORY_CHARS`, `MAX_TOKENS`, `MAX_TURNS` | Conversation budgets. |
-| `AGENT_TIMEOUT` | Per-message deadline (seconds). |
-
-Per-agent settings:
+Every container loads `configs/secrets.env` as a docker-compose `env_file`. Conventions:
 
 | Variable | Purpose |
 |---|---|
-| `AGENT_NAME`, `AGENT_EMAIL`, `EMAIL_PASSWORD` | This agent's identity and inbox. |
-| `LLM_PROVIDER` | `anthropic` or `openrouter`. |
-| `LLM_MODEL` | Model id (vendor-prefixed for OpenRouter, e.g. `anthropic/claude-sonnet-4.6`). |
-| `LLM_OPENROUTER_BACKUP` | Comma-separated fallback models (OpenRouter only). |
-| `SYSTEM_PROMPT` | Optional override; supports `{{coworkers}}` template. |
-| `WHITELIST` / `BLACKLIST` | Comma-separated addresses or domains. **Whitelist takes precedence.** |
+| `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` | LLM credentials (at least one required). |
+| `<UPPER_STEM>_EMAIL_PASSWORD` | Mailbox password, one per agent. Stem = uppercased local-part of the agent email. Example: `KIKU_EMAIL_PASSWORD` for `kiku@…`. |
+| Tool credentials | `SALESFORCE_CLIENT_ID`, `BUFFER_API_KEY`, `WORDPRESS_PASSWORD`, … (see `configs/secrets-example.env`). |
 
-Whitelist mode is strict (every immediate sender must match). Blacklist mode is lenient (walks the full thread to catch hidden bad actors). See [`configs/env/README.md`](configs/env/README.md).
+The container resolves its own mailbox password by uppercasing the local-part of `AGENT_EMAIL` and appending `_EMAIL_PASSWORD` — no per-agent env file needed.
 
 ### Knowledge base — `configs/knowledge/`
 
@@ -179,7 +188,7 @@ Files are sorted by name — use numeric prefixes (`01_`, `02_`) to control orde
 
 ### Tool credentials
 
-Each integration adds its own variables to the agent's env file. The most common:
+Each integration adds its own variables to `configs/secrets.env`. The most common:
 
 - **`salesforce_mcp`** — `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET`, `SALESFORCE_INSTANCE_URL`
 - **`wordpress`** — `WEBSITE_URL`, `WORDPRESS_USER`, `WORDPRESS_PASSWORD`
@@ -359,19 +368,19 @@ REST API for extracting text from PDFs, Office docs, HTML, and more. Used by the
 
 ## Running multiple agents
 
-`docker-compose.yml` ships with one active service (`kiku-alpha`) and commented templates for `beta`, `gamma`, and `delta`. To bring up additional agents, uncomment the service block and create the matching `configs/env/<agent>.env`.
+`docker-compose-example.yml` ships with one active service (`kiku`) and commented templates for `beta`, `gamma`, and `delta`. To bring up additional agents, uncomment the service block and ensure a matching entry exists in `configs/agents.yaml` and a matching `<UPPER_STEM>_EMAIL_PASSWORD` in `configs/secrets.env`. The `scripts/configurator` tool can regenerate `docker-compose.yml` for you whenever you add or edit an agent.
 
 ```bash
-# After editing docker-compose.yml + adding env files:
+# After editing docker-compose.yml + adding agents/secrets:
 docker compose up -d --build --remove-orphans
 
-# After only env-variable changes:
+# After only secrets.env changes:
 docker compose up --force-recreate
 ```
 
 ## Development
 
-Local development uses Go 1.26 and the `dev` build tag, which loads `./configs/env/common.env` and `./configs/env/kiku.env` via godotenv.
+Local development uses Go 1.26 and the `dev` build tag, which loads `./configs/secrets.env` via godotenv. Non-secret config (the agent roster, common defaults, per-agent overrides) is read from `./configs/agents.yaml`. Set `AGENT_EMAIL` in your shell or IDE run-configuration to pick which agent the binary impersonates.
 
 ```bash
 go run -tags=dev cmd/kikubot/main.go

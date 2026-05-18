@@ -30,8 +30,6 @@ func (s *server) render(w http.ResponseWriter, r *http.Request, name string, p p
 	}
 }
 
-// flash is a tiny one-shot cookie used to carry success/error notices across
-// a redirect. It avoids needing a session store while still letting POST/redirect/GET work cleanly.
 const flashCookie = "ac_flash"
 
 func setFlash(w http.ResponseWriter, kind, msg string) {
@@ -56,6 +54,30 @@ func readFlash(r *http.Request, w http.ResponseWriter) (msg, kind string) {
 	return parts[1], parts[0]
 }
 
+// resolveAgentEmail looks up an agent by either the lowercased local-part of
+// the email (legacy "stem" query param) or the full email address. Both forms
+// are accepted to keep existing bookmarks working.
+func resolveAgentEmail(root, stemOrEmail string) string {
+	stemOrEmail = strings.TrimSpace(stemOrEmail)
+	if stemOrEmail == "" {
+		return ""
+	}
+	if strings.Contains(stemOrEmail, "@") {
+		return stemOrEmail
+	}
+	want := strings.ToLower(stemOrEmail)
+	r, err := loadRoster(root)
+	if err != nil {
+		return ""
+	}
+	for _, a := range r.Agents {
+		if emailStem(a.Email) == want {
+			return a.Email
+		}
+	}
+	return ""
+}
+
 // ---- Home ----
 
 func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
@@ -72,19 +94,20 @@ func (s *server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		d := &commonDefaults{
-			EmailServer:     r.FormValue("EMAIL_SERVER"),
-			SMTPServer:      r.FormValue("SMTP_SERVER"),
-			MaxHistoryChars: r.FormValue("MAX_HISTORY_CHARS"),
-			MaxTokens:       r.FormValue("MAX_TOKENS"),
-			AnthropicAPIKey: r.FormValue("ANTHROPIC_API_KEY"),
-			OpenRouterKey:   r.FormValue("OPENROUTER_API_KEY"),
-			SystemPrompt:    r.FormValue("SYSTEM_PROMPT"),
-			AgentTimeout:    r.FormValue("AGENT_TIMEOUT"),
+			EmailServer:      r.FormValue("EMAIL_SERVER"),
+			SMTPServer:       r.FormValue("SMTP_SERVER"),
+			EmailInsecureTLS: r.FormValue("EMAIL_INSECURE_TLS") == "1",
+			MaxHistoryChars:  r.FormValue("MAX_HISTORY_CHARS"),
+			MaxTokens:        r.FormValue("MAX_TOKENS"),
+			AgentTimeout:     r.FormValue("AGENT_TIMEOUT"),
+			SystemPrompt:     r.FormValue("SYSTEM_PROMPT"),
+			AnthropicAPIKey:  r.FormValue("ANTHROPIC_API_KEY"),
+			OpenRouterKey:    r.FormValue("OPENROUTER_API_KEY"),
 		}
 		if err := saveCommonDefaults(s.root, d); err != nil {
 			setFlash(w, "error", "Save failed: "+err.Error())
 		} else {
-			setFlash(w, "success", "Saved configs/env/common.env")
+			setFlash(w, "success", "Saved configs/agents.yaml (common) and configs/secrets.env")
 		}
 		http.Redirect(w, r, "/agents/defaults", http.StatusSeeOther)
 		return
@@ -100,28 +123,24 @@ func (s *server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 // ---- Add / Edit Agent ----
 
 func (s *server) handleAgentNew(w http.ResponseWriter, r *http.Request) {
-	common, _ := loadCommonDefaults(s.root)
-	a := &agentForm{
-		LLMProvider:  "anthropic",
-		SystemPrompt: "",
-	}
-	if common != nil {
-		a.SystemPrompt = common.SystemPrompt
-	}
-	a.ExcludeCollaborators = false
+	a := newAgentForm(s.root)
 	a.Registry, _ = loadToolRegistry(s.root)
 	_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
-	a.HasAnthropicKey, a.HasOpenRouterKey = llmKeyAvailability(s.root, "")
+	a.HasAnthropicKey, a.HasOpenRouterKey = hasLLMKeys(s.root)
 	s.render(w, r, "agent_form", pageData{Active: "new", Data: a})
 }
 
 func (s *server) handleAgentEdit(w http.ResponseWriter, r *http.Request) {
-	stem := r.URL.Query().Get("stem")
-	if stem == "" {
+	q := r.URL.Query()
+	email := resolveAgentEmail(s.root, q.Get("email"))
+	if email == "" {
+		email = resolveAgentEmail(s.root, q.Get("stem"))
+	}
+	if email == "" {
 		http.Redirect(w, r, "/agents/list", http.StatusSeeOther)
 		return
 	}
-	a, err := loadAgentForm(s.root, stem)
+	a, err := loadAgentForm(s.root, email)
 	if err != nil {
 		setFlash(w, "error", "Load failed: "+err.Error())
 		http.Redirect(w, r, "/agents/list", http.StatusSeeOther)
@@ -129,7 +148,7 @@ func (s *server) handleAgentEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Registry, _ = loadToolRegistry(s.root)
 	_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
-	a.HasAnthropicKey, a.HasOpenRouterKey = llmKeyAvailability(s.root, stem)
+	a.HasAnthropicKey, a.HasOpenRouterKey = hasLLMKeys(s.root)
 	s.render(w, r, "agent_form", pageData{Active: "list", Data: a})
 }
 
@@ -139,8 +158,13 @@ func (s *server) handleAgentSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
+	original := r.FormValue("original_email")
+	if original == "" {
+		// Accept legacy 'original_stem' field — older templates still post it.
+		original = resolveAgentEmail(s.root, r.FormValue("original_stem"))
+	}
 	a := &agentForm{
-		OriginalStem:         r.FormValue("original_stem"),
+		OriginalEmail:        original,
 		Name:                 r.FormValue("name"),
 		Email:                r.FormValue("email"),
 		EmailPassword:        r.FormValue("email_password"),
@@ -160,10 +184,9 @@ func (s *server) handleAgentSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := a.save(s.root); err != nil {
 		setFlash(w, "error", "Save failed: "+err.Error())
-		// Re-render the form with submitted values so the user doesn't lose input.
 		a.Registry, _ = loadToolRegistry(s.root)
 		_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
-		a.HasAnthropicKey, a.HasOpenRouterKey = llmKeyAvailability(s.root, a.OriginalStem)
+		a.HasAnthropicKey, a.HasOpenRouterKey = hasLLMKeys(s.root)
 		s.render(w, r, "agent_form", pageData{Active: "new", Data: a, Flash: err.Error(), FlashKind: "error"})
 		return
 	}
@@ -258,8 +281,7 @@ func infoIcon(text string) template.HTML {
 }
 
 // toolsDataAttr serializes the tool registry to a JSON object for the chip
-// UI's `data-tools` attribute. Output is HTML-attribute safe (the template
-// engine still escapes it on render — we just want compact JSON).
+// UI's `data-tools` attribute.
 func toolsDataAttr(infos []toolInfo) template.HTMLAttr {
 	if len(infos) == 0 {
 		return template.HTMLAttr("{}")

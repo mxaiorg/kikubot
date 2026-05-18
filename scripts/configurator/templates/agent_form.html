@@ -2,11 +2,11 @@
 {{define "page"}}
 {{with .Data}}
 <header class="page-header">
-  <h1>{{if .OriginalStem}}Edit Agent{{else}}Add Agent{{end}}</h1>
-  <p class="lead">Per-agent variables override <code>common.env</code>. Values matching the common defaults are not duplicated to the agent file.</p>
+  <h1>{{if .OriginalEmail}}Edit Agent{{else}}Add Agent{{end}}</h1>
+  <p class="lead">Per-agent values override the <code>common:</code> block of <code>configs/agents.yaml</code>. Mailbox passwords are written to <code>configs/secrets.env</code>.</p>
 </header>
 <form class="card" method="post" action="/agents/save" data-agent-form>
-  <input type="hidden" name="original_stem" value="{{.OriginalStem}}">
+  <input type="hidden" name="original_email" value="{{.OriginalEmail}}">
   <div class="grid">
     <label><span class="field-label">Agent name (AGENT_NAME) {{infoIcon "The agent’s name. Used in the email address."}}</span>
       <input name="name" value="{{.Name}}" required>
@@ -57,7 +57,7 @@
       </label>
       <div class="full" data-coordinator-toggle data-coordinator-default="{{.CoordinatorPromptDefault}}">
         <label><span class="field-label">System prompt (SYSTEM_PROMPT) {{infoIcon "Setting this field overrides the default system prompt. The `{{coworkers}}` variable will be filled at runtime with the roster of agents pulled from `agents.yaml`. The final system prompt will include additional context provided by tools and knowledge. Agent specific prompts can better context for an agent’s role and abilities."}}</span>
-          <textarea name="system_prompt" id="system-prompt-textarea" rows="6" placeholder="Defaults to common.env SYSTEM_PROMPT">{{.SystemPrompt}}</textarea>
+          <textarea name="system_prompt" id="system-prompt-textarea" rows="6" placeholder="Defaults to the common system_prompt in agents.yaml">{{.SystemPrompt}}</textarea>
         </label>
         <div class="actions">
           <button type="button" class="ghost" id="paste-coordinator">Paste Coordinator prompt</button>
@@ -98,6 +98,8 @@
           <div class="chip-picker is-hidden"></div>
         </div>
         <small class="hint">Mouse over a tool for its description (parsed live from <code>internal/tools/</code>).</small>
+        <p class="hint">⚠️ To communicate with users, an agents needs the <code>report</code> tool. To create <scheduled></scheduled> tasks the agents needs the <code>snooze</code> tool.</p>
+        <p class="hint">To create your own tools, see <code>internal/tools/README.md</code></p>
       </div>
     </div>
   </fieldset>

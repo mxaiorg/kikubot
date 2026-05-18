@@ -58,9 +58,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Configuration
 
-- **`agents.yaml`** (`AGENTS_CONFIG` env > next to binary > next to source) declares the roster: `name`, `email`, `role`, `description`, `tools`. The `Coworkers()` list (everyone except self) is JSON-formatted into the system prompt at the `{{coworkers}}` template marker. Email keys are populated into `config.AgentEmails` for `findAnchor`.
+- **`configs/agents.yaml`** (`AGENTS_CONFIG` env > next to binary > next to source) is the single source of truth for non-secret deployment config. It has two sections: `common:` (defaults inherited by every agent — mail server, prompts, budgets) and `agents:` (roster — `name`, `email`, `role`, `description`, `tools`, plus optional per-agent overrides of any `common:` field). The `Coworkers()` list (everyone except self, with overrides stripped) is JSON-formatted into the system prompt at the `{{coworkers}}` template marker. Email keys are populated into `config.AgentEmails` for `findAnchor`.
+- **`configs/secrets.env`** carries every secret — LLM provider keys, tool credentials, and per-agent `<UPPER_STEM>_EMAIL_PASSWORD` (e.g. `KIKU_EMAIL_PASSWORD` for `kiku@…`). Every container loads it as `env_file`. The container picks its identity via the per-service `AGENT_EMAIL` env var and resolves its mailbox password by uppercasing the local-part.
 - **Knowledge base** (`configs/knowledge/<agentKey>/*.md`, plus shared `configs/knowledge/common/`) is concatenated and appended to the system prompt at startup. `agentKey` = local-part of `AGENT_EMAIL` lowercased. Files are sorted by name, so use numeric prefixes (`01_…md`, `02_…md`) to control order. The Dockerfile copies `configs/knowledge/` to `/app/knowledge/`; `knowledgeBaseDir()` looks next to the executable first, then falls back to next to the source file in dev.
-- **Per-agent env files** under `configs/env/<agentKey>.env` override `common.env`. `agents.yaml` and `*.env` example versions are committed; the live ones are `.gitignore`d (along with `box_config.json` and DMS certs/maildata).
+- **Example files** (`configs/agents-example.yaml`, `configs/secrets-example.env`, `docker-compose-example.yml`) are committed; the live counterparts are gitignored along with `box_config.json` and DMS certs/maildata.
 
 ## Key conventions
 

@@ -48,7 +48,7 @@ func main() {
 		validateAgentTools(af, keys, localAccounts, r)
 		validateNpxPackages(abs, af, localAccounts, factories, r)
 	}
-	validateEnvFiles(abs, af, r)
+	validateSecrets(abs, af, localAccounts, r)
 	validateCompose(abs, cf, r)
 
 	r.Summary()

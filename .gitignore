@@ -1,10 +1,7 @@
 /services/dms/certs/fullchain.pem
 /services/dms/certs/privkey.pem
-/configs/env/beta.env
-/configs/env/common.env
-/configs/env/delta.env
-/configs/env/gamma.env
-/configs/env/kiku.env
+/configs/secrets.env
+/configs/agents.yaml
 /services/dms/maildata/
 /data/
 /box_config.json
@@ -13,7 +10,6 @@
 /services/dms/services/dovecot-quotas.cf
 /services/dms/services/postfix-accounts.cf
 /services/dms/config/dovecot-quotas.cf
-/configs/agents.yaml
 /services/dms/docker-compose.yml
 /services/dms/config/postfix-sender-access.cf
 /services/dms/config/postfix-transport.cf

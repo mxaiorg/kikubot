@@ -3,7 +3,7 @@
 {{with .Data}}
 <header class="page-header">
   <h1>Agent Defaults</h1>
-  <p class="lead">Configure the agents you want to run on this machine. Each agent will run in its own container. Values here are written to <code>configs/env/common.env</code> and inherited by every agent.</p>
+  <p class="lead">Defaults inherited by every agent. Knobs are written to the <code>common:</code> block of <code>configs/agents.yaml</code>; API keys are written to <code>configs/secrets.env</code>.</p>
 </header>
 <form class="card" method="post" action="/agents/defaults">
   <div class="grid">
@@ -15,6 +15,9 @@
     </label>
     <label><span class="field-label">AGENT_TIMEOUT (seconds) {{infoIcon "How long an agent will process an email before giving up and informing the user."}}</span>
       <input name="AGENT_TIMEOUT" value="{{.AgentTimeout}}" placeholder="300">
+    </label>
+    <label class="checkbox full"><span class="field-label">EMAIL_INSECURE_TLS {{infoIcon "Accept self-signed TLS certs from the mail server. Required when using the bundled docker-mailserver with self-signed certs."}}</span>
+      <input type="checkbox" name="EMAIL_INSECURE_TLS" value="1" {{if .EmailInsecureTLS}}checked{{end}}>
     </label>
     <label><span class="field-label">MAX_HISTORY_CHARS {{infoIcon "Max characters of prior conversation kept per turn. Older messages are trimmed when exceeded; the anchor (most recent human message) is always preserved. Higher = more context, more cost. Default 50,000."}}</span>
       <input name="MAX_HISTORY_CHARS" value="{{.MaxHistoryChars}}" placeholder="200000">

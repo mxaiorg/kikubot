@@ -8,19 +8,15 @@ import (
 	"strings"
 )
 
-// emailServerHost reads EMAIL_SERVER from common.env (falling back to the
-// example) and returns just the hostname portion (port stripped). Returns
-// a placeholder if neither file defines it.
+// emailServerHost reads common.email_server from agents.yaml and returns
+// just the hostname portion (port stripped). Returns a placeholder when
+// the roster is empty or missing.
 func emailServerHost(root string) string {
-	f, err := loadCommonEnv(root)
-	if err != nil || f == nil {
+	r, err := loadRoster(root)
+	if err != nil || r == nil || strings.TrimSpace(r.Common.EmailServer) == "" {
 		return "mail.agents.example.com"
 	}
-	v, _ := f.Get("EMAIL_SERVER")
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return "mail.agents.example.com"
-	}
+	v := strings.TrimSpace(r.Common.EmailServer)
 	if i := strings.LastIndex(v, ":"); i > 0 {
 		v = v[:i]
 	}
@@ -28,16 +24,16 @@ func emailServerHost(root string) string {
 }
 
 // composePath is the live docker-compose.yml at the project root. The
-// configurator regenerates this file from the list of agents in
-// configs/env/<stem>.env whenever an agent is saved.
+// configurator regenerates this file from the roster whenever an agent is
+// saved.
 func composePath(root string) string {
 	return filepath.Join(root, "docker-compose.yml")
 }
 
-// composeServiceName converts an agent's display name into a key that is
-// valid as a docker-compose service identifier: lowercased, non-alphanumeric
-// runs collapsed to a single '-', trimmed at the edges. Falls back to the
-// file stem (local-part of email) when the result would be empty.
+// composeServiceName converts an agent's display name into a valid
+// docker-compose service identifier: lowercased, non-alphanumeric runs
+// collapsed to '-', trimmed at the edges. Falls back to the file stem
+// (local-part of email) when the result is empty.
 func composeServiceName(name, stem string) string {
 	var b strings.Builder
 	prevDash := true
@@ -60,26 +56,23 @@ func composeServiceName(name, stem string) string {
 	return out
 }
 
-// regenerateCompose writes docker-compose.yml at the project root with one
-// service per agent currently configured in configs/env/. The format mirrors
-// docker-compose-example.yml: build, two env_files (common + per-agent),
-// RUNNING_IN_CONTAINER=true, restart policy, host.docker.internal extra host,
-// and a ./data/<stem> volume mapped to /app/data.
+// regenerateCompose writes docker-compose.yml with one service per agent
+// currently in configs/agents.yaml. Each service shares the same
+// configs/secrets.env env_file (so credentials are loaded once) and is
+// distinguished by an AGENT_EMAIL environment variable — that selector lets
+// the container pick the right entry from agents.yaml at startup.
 func regenerateCompose(root string) error {
 	agents, err := listAgents(root)
 	if err != nil {
 		return fmt.Errorf("listing agents: %w", err)
 	}
 
-	// Deterministic service ordering with collision handling so two agents
-	// with names that sanitize to the same key still produce distinct keys.
 	type svc struct {
-		Key  string
-		Stem string
+		Key   string
+		Stem  string
+		Email string
 	}
-	// Email server host (without port) for the optional host-gateway entry.
 	emailHost := emailServerHost(root)
-
 	svcs := make([]svc, 0, len(agents))
 	used := map[string]int{}
 	for _, a := range agents {
@@ -88,7 +81,7 @@ func regenerateCompose(root string) error {
 			key = fmt.Sprintf("%s-%d", key, n+1)
 		}
 		used[composeServiceName(a.Name, a.Stem)]++
-		svcs = append(svcs, svc{Key: key, Stem: a.Stem})
+		svcs = append(svcs, svc{Key: key, Stem: a.Stem, Email: a.Email})
 	}
 	sort.Slice(svcs, func(i, j int) bool { return svcs[i].Key < svcs[j].Key })
 
@@ -101,10 +94,10 @@ func regenerateCompose(root string) error {
 		fmt.Fprintf(&b, "  %s:\n", s.Key)
 		b.WriteString("    build: .\n")
 		b.WriteString("    env_file:\n")
-		b.WriteString("      - configs/env/common.env\n")
-		fmt.Fprintf(&b, "      - configs/env/%s.env\n", s.Stem)
+		b.WriteString("      - configs/secrets.env\n")
 		b.WriteString("    environment:\n")
 		b.WriteString("      - RUNNING_IN_CONTAINER=true\n")
+		fmt.Fprintf(&b, "      - AGENT_EMAIL=%s\n", s.Email)
 		b.WriteString("    restart: unless-stopped\n")
 		b.WriteString("    extra_hosts:\n")
 		b.WriteString("      - \"host.docker.internal:host-gateway\"\n")

@@ -8,27 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 
+	"kikubot/internal/config"
+
 	"gopkg.in/yaml.v3"
 )
 
-// rosterAgent mirrors a single entry under `agents:` in configs/agents.yaml.
-// It is the public-facing roster as opposed to the env-level agent config.
-type rosterAgent struct {
-	Name        string   `yaml:"name"`
-	Email       string   `yaml:"email"`
-	Role        string   `yaml:"role,omitempty"`
-	Description string   `yaml:"description,omitempty"`
-	Tools       []string `yaml:"tools,flow,omitempty"`
-}
+// roster is the in-memory model of configs/agents.yaml. The configurator
+// reads, mutates, and writes through this type; the runtime parses the
+// same YAML with kikubot/internal/config.Load.
+type roster = config.AgentsConfig
 
-type roster struct {
-	Agents []rosterAgent `yaml:"agents"`
-}
-
+// rosterPath returns the configs/agents.yaml path under root.
 func rosterPath(root string) string {
 	return filepath.Join(root, "configs", "agents.yaml")
 }
 
+// loadRoster reads configs/agents.yaml. Returns a zero-value roster (no
+// error) when the file does not exist — first-run setups have nothing to
+// read yet.
 func loadRoster(root string) (*roster, error) {
 	b, err := os.ReadFile(rosterPath(root))
 	if err != nil {
@@ -44,9 +41,9 @@ func loadRoster(root string) (*roster, error) {
 	return &r, nil
 }
 
-// findAgent returns the index of an agent matching email (case-insensitive)
-// or -1.
-func (r *roster) findAgent(email string) int {
+// findAgentIndex returns the index of the agent matching email
+// (case-insensitive), or -1.
+func findAgentIndex(r *roster, email string) int {
 	want := strings.ToLower(strings.TrimSpace(email))
 	for i, a := range r.Agents {
 		if strings.ToLower(strings.TrimSpace(a.Email)) == want {
@@ -56,16 +53,27 @@ func (r *roster) findAgent(email string) int {
 	return -1
 }
 
-// upsert adds or updates an entry. The match key is email.
-func (r *roster) upsert(a rosterAgent) {
-	if i := r.findAgent(a.Email); i >= 0 {
+// upsertAgent adds or updates an entry. The match key is email.
+func upsertAgent(r *roster, a config.AgentDef) {
+	if i := findAgentIndex(r, a.Email); i >= 0 {
 		r.Agents[i] = a
 		return
 	}
 	r.Agents = append(r.Agents, a)
 }
 
-func (r *roster) save(root string) error {
+// removeAgent drops the entry matching email (case-insensitive). No-op when
+// the email isn't present.
+func removeAgent(r *roster, email string) {
+	if i := findAgentIndex(r, email); i >= 0 {
+		r.Agents = append(r.Agents[:i], r.Agents[i+1:]...)
+	}
+}
+
+// saveRoster writes the roster back to configs/agents.yaml. The yaml encoder
+// is configured for 2-space indent which mirrors the example file shipped
+// with the repo.
+func saveRoster(root string, r *roster) error {
 	dir := filepath.Dir(rosterPath(root))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -82,23 +90,7 @@ func (r *roster) save(root string) error {
 	return os.WriteFile(rosterPath(root), []byte(buf.String()), 0o644)
 }
 
-// strBuf adapts *strings.Builder to io.Writer (Builder already implements
-// Write but yaml.NewEncoder wants io.Writer — Builder satisfies it).
-// Keeping the indirection so we can swap in a buffer type that injects blank
-// lines between agents later if needed.
+// strBuf adapts *strings.Builder to io.Writer for yaml.NewEncoder.
 type strBuf struct{ *strings.Builder }
 
 func (b *strBuf) Write(p []byte) (int, error) { return b.Builder.Write(p) }
-
-// rosterAgentFor returns the live roster entry for an agent (by email), or a
-// zero-value entry if none exists yet.
-func rosterAgentFor(root, email string) rosterAgent {
-	r, err := loadRoster(root)
-	if err != nil {
-		return rosterAgent{}
-	}
-	if i := r.findAgent(email); i >= 0 {
-		return r.Agents[i]
-	}
-	return rosterAgent{}
-}

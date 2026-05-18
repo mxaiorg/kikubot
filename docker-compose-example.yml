@@ -1,11 +1,18 @@
+# Kikubot deployment — one service per agent.
+#
+# Every service shares the same secrets file (configs/secrets.env) and is
+# distinguished only by AGENT_EMAIL. The container reads configs/agents.yaml
+# at startup, finds the matching entry, and resolves its mailbox password
+# from <UPPERCASED_LOCAL_PART>_EMAIL_PASSWORD.
+
 services:
-  kiku-alpha:
+  kiku:
     build: .
     env_file:
-      - configs/env/common.env
-      - configs/env/kiku.env
+      - configs/secrets.env
     environment:
       - RUNNING_IN_CONTAINER=true
+      - AGENT_EMAIL=kiku@agents.example.com
 #      - DEBUG_ANTHROPIC_REQUEST=1
     restart: unless-stopped
     extra_hosts:
@@ -14,44 +21,44 @@ services:
     volumes:
       - ./data/kiku:/app/data
 
-#  kiku-beta:
+#  beta:
 #    build: .
 #    env_file:
-#      - configs/env/common.env
-#      - configs/env/beta.env
+#      - configs/secrets.env
 #    environment:
 #      - RUNNING_IN_CONTAINER=true
+#      - AGENT_EMAIL=beta@agents.example.com
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
-#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
+##      - "mail.agents.example.com:host-gateway" # optional for localhost email server
 #    volumes:
 #      - ./data/beta:/app/data
 #
-#  kiku-gamma:
+#  gamma:
 #    build: .
 #    env_file:
-#      - configs/env/common.env
-#      - configs/env/gamma.env
+#      - configs/secrets.env
 #    environment:
 #      - RUNNING_IN_CONTAINER=true
+#      - AGENT_EMAIL=gamma@agents.example.com
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
-#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
+##      - "mail.agents.example.com:host-gateway" # optional for localhost email server
 #    volumes:
 #      - ./data/gamma:/app/data
 #
-#  kiku-delta:
+#  delta:
 #    build: .
 #    env_file:
-#      - configs/env/common.env
-#      - configs/env/delta.env
+#      - configs/secrets.env
 #    environment:
 #      - RUNNING_IN_CONTAINER=true
+#      - AGENT_EMAIL=delta@agents.example.com
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
-#      - "mail.agents.example.com:host-gateway" # optional for localhost email server
+##      - "mail.agents.example.com:host-gateway" # optional for localhost email server
 #    volumes:
 #      - ./data/delta:/app/data

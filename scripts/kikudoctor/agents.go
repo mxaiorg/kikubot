@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Agent is a single entry under `agents:` in configs/agents.yaml. Only the
+// fields kikudoctor needs are unmarshalled; per-agent overrides are ignored.
 type Agent struct {
 	Name        string   `yaml:"name"`
 	Email       string   `yaml:"email"`
@@ -17,11 +19,21 @@ type Agent struct {
 	Tools       []string `yaml:"tools"`
 }
 
+// Common mirrors the `common:` block of agents.yaml. kikudoctor reads only
+// the fields it needs to issue advice (mail server, system prompt, key budgets).
+type Common struct {
+	EmailServer  string `yaml:"email_server"`
+	SmtpServer   string `yaml:"smtp_server"`
+	SystemPrompt string `yaml:"system_prompt"`
+}
+
+// AgentsFile is the full agents.yaml file.
 type AgentsFile struct {
+	Common Common  `yaml:"common"`
 	Agents []Agent `yaml:"agents"`
 }
 
-// loadAgents reads and parses configs/agents.yaml. It returns the parsed file
+// loadAgents reads and parses configs/agents.yaml. Returns the parsed file
 // (possibly empty on error), and emits findings for missing/malformed input.
 func loadAgents(root string, r *Report) (*AgentsFile, bool) {
 	path := filepath.Join(root, "configs", "agents.yaml")
@@ -44,6 +56,14 @@ func loadAgents(root string, r *Report) (*AgentsFile, bool) {
 		return nil, false
 	}
 	sec.Pass("file is well-formed YAML")
+
+	// Common section sanity — non-fatal warnings for missing essentials.
+	if strings.TrimSpace(af.Common.EmailServer) == "" {
+		sec.Warn("common.email_server is not set")
+	}
+	if strings.TrimSpace(af.Common.SmtpServer) == "" {
+		sec.Warn("common.smtp_server is not set")
+	}
 
 	if len(af.Agents) == 0 {
 		sec.Fail("no agents defined")

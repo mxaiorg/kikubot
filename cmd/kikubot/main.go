@@ -24,7 +24,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-var agent *agents.Agent
+var (
+	agent     *agents.Agent
+	agentsCfg *config.AgentsConfig
+)
 
 // emailRetryCounts tracks how many times each inbound Message-Id has been
 // left unseen for retry. Process-local — survives across poll ticks but
@@ -36,7 +39,15 @@ func main() {
 	log.SetFlags(log.Lshortfile)
 
 	dotenv.LoadEnvFile()
-	config.LoadEnv()
+	cfg, cfgErr := config.Load(agentsConfigPath())
+	if cfgErr != nil {
+		log.Fatalf("error loading agents.yaml: %v", cfgErr)
+	}
+	if cfg == nil {
+		log.Fatalf("agents.yaml not found at %s — see CONFIGURATION.md", agentsConfigPath())
+	}
+	agentsCfg = cfg
+	config.Apply(cfg)
 	services.InitDataPaths(config.InContainer)
 	log.Printf("Agent, %s (%s), is alive!\n", config.AgentName, config.AgentEmail)
 
@@ -462,37 +473,18 @@ func initAgent() {
 	// Setup agentTools
 	agentTools := tools.CoreTools()
 
-	// Load agent configuration from YAML
-	cfg, cfgErr := config.Load(agentsConfigPath())
-	if cfgErr != nil {
-		log.Fatalf("error loading agents services: %v", cfgErr)
-	}
-
+	cfg := agentsCfg
 	if cfg != nil {
 		if agentDef := cfg.FindAgent(config.AgentEmail); agentDef != nil {
 			for _, key := range agentDef.Tools {
 				t, ok := tools.LookupTools(key)
 				if !ok {
-					log.Printf("warning: unknown tool key %q in services for %s", key, config.AgentEmail)
+					log.Printf("warning: unknown tool key %q for %s", key, config.AgentEmail)
 					continue
 				}
 				agentTools = append(agentTools, t...)
 			}
-		} else {
-			log.Printf("warning: no agent services found for %s, using core scripts only", config.AgentEmail)
 		}
-		// Populate the known-agent-email set so trimHistory can distinguish
-		// peer replies from human requests (the "anchor") when picking a
-		// cutpoint. Self is included so that our own sent copies, if ever
-		// reflected back in history, are classified as agent traffic too.
-		config.AgentEmails = make(map[string]bool, len(cfg.Agents))
-		for _, a := range cfg.Agents {
-			if a.Email != "" {
-				config.AgentEmails[strings.ToLower(a.Email)] = true
-			}
-		}
-	} else {
-		log.Println("warning: agents.yaml not found, using core scripts only")
 	}
 
 	// Deduplicate scripts by name

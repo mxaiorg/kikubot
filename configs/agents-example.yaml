@@ -1,27 +1,78 @@
-# Example agents.yaml
-# Copy this file to agents.yaml and edit the values
+# Kikubot deployment configuration.
 #
+# common:  shared defaults inherited by every agent
+# agents:  per-agent identity, role, tools, plus optional overrides
+#
+# Secrets (API keys, mailbox passwords) live in configs/secrets.env — never
+# inline them here. The runtime selects its identity from AGENT_EMAIL (set
+# per-service in docker-compose.yml).
+#
+# Copy this file to configs/agents.yaml and edit the values.
+
+common:
+  email_server: mail.agents.example.com:993
+  smtp_server: mail.agents.example.com:587
+  email_insecure_tls: false
+
+  max_history_chars: 200000
+  max_tokens: 6000
+  agent_timeout: 300
+  max_turns: 20
+
+  system_prompt: |
+    You are a helpful agent that serves two groups — users and coworkers. Your role is to resolve tasks submitted by users, drawing on your coworkers below as needed.
+    {{coworkers}}
+
+  coordinator_system_prompt: |
+    You are a helpful Coordinator Agent. You coordinate and execute tasks sent to you by users with the help of your coworkers, if there are any listed. Your role is to resolve and report back on tasks submitted by users, drawing on your tools and available coworkers as needed. You ALWAYS report back (report_tool) to the user when a task is concluded, can not be concluded, or you have questions for the user.
+    {{coworkers}}
+
 agents:
   - name: Kiku
     email: kiku@agents.example.com
-    role: "Coordinator"
-    description: "Communicates with users. Manages tasks and resources. Coordinates other agents."
+    role: Coordinator
+    description: Communicates with users. Manages tasks and resources. Coordinates other agents.
     tools: [report, snooze]
+    # Coordinator overrides — bigger history budget and more turns because
+    # each delegation round-trip burns a turn.
+    llm_provider: openrouter
+    llm_model: anthropic/claude-sonnet-4.6
+    llm_openrouter_backup: z-ai/glm-5.1
+    max_history_chars: 300000
+    max_turns: 40
+    whitelist: [example.com, agents.example.com]
+    system_prompt: |
+      Kiku, you are a helpful Coordinator Agent. You coordinate and execute tasks sent to you by users with the help of your coworkers, if there are any listed. Your role is to resolve and report back on tasks submitted by users, drawing on your tools and available coworkers as needed. You ALWAYS report back (report_tool) to the user when a task is concluded, can not be concluded, or you have questions for the user.
+      {{coworkers}}
 
   - name: Beta
     email: beta@agents.example.com
-    role: "CRM, Email Archivist"
-    description: "Manages Salesforce and access to the company email record"
+    role: CRM, Email Archivist
+    description: Manages Salesforce and access to the company email record.
     tools: [mxmcp, salesforce_mcp]
+    llm_provider: openrouter
+    llm_model: anthropic/claude-sonnet-4.6
+    llm_openrouter_backup: z-ai/glm-5.1
+    whitelist: [example.com, agents.example.com]
 
   - name: Gamma
     email: gamma@agents.example.com
-    role: "Social Media, Web Searcher"
-    description: "Creates and posts social media posts in draft form. Searches the web for relevant content."
-    tools: [buffer_mcp, anthropic_web_search]
+    role: Social Media, Web Searcher
+    description: Creates draft social media posts. Searches the web for relevant content. Video archivist.
+    tools: [buffer_mcp, tavily_mcp, vimeo]
+    llm_provider: openrouter
+    llm_model: anthropic/claude-sonnet-4.6
+    llm_openrouter_backup: z-ai/glm-5.1
+    max_tokens: 12000
+    agent_timeout: 600
+    whitelist: [example.com, agents.example.com]
 
   - name: Delta
     email: delta@agents.example.com
-    role: "Webmaster, Web Searcher, Knowledge Base (FAQ) Maintainer, File Manager"
-    description: "Updates the company website. Answers and updates questions about mxHERO. Retrieves company files. Downloads URLs. Converts files to text."
+    role: Webmaster, Web Searcher, Knowledge Base (FAQ) Maintainer, File Manager
+    description: Updates the company website. Maintains the FAQ knowledge base. Retrieves company files. Downloads URLs. Converts files to text.
     tools: [wordpress, tavily_mcp, helpjuice, box_cli, download, file_text]
+    llm_provider: anthropic
+    llm_model: claude-sonnet-4-6
+    agent_timeout: 600
+    whitelist: [example.com, agents.example.com]

@@ -41,24 +41,19 @@ func parseCompose(root string) *composeFile {
 }
 
 // localAgentAccounts derives the set of agent email accounts that this
-// machine actually deploys, by inspecting each service's per-agent env_file
-// (any *.env other than common.env). The stem of that file is the account.
+// machine actually deploys, by inspecting each service's AGENT_EMAIL
+// environment variable. The local-part of that address is the account.
 func localAgentAccounts(cf *composeFile) map[string]bool {
 	accounts := map[string]bool{}
 	if cf == nil {
 		return accounts
 	}
 	for _, svc := range cf.Services {
-		for _, ef := range stringsFromScalarOrSeq(svc.EnvFile) {
-			base := filepath.Base(ef)
-			if !strings.HasSuffix(base, ".env") {
-				continue
+		env := environmentMap(svc.Environment)
+		if email := strings.TrimSpace(env["AGENT_EMAIL"]); email != "" {
+			if acct := emailAccount(email); acct != "" {
+				accounts[acct] = true
 			}
-			stem := strings.ToLower(strings.TrimSuffix(base, ".env"))
-			if stem == "" || stem == "common" {
-				continue
-			}
-			accounts[stem] = true
 		}
 	}
 	return accounts
@@ -137,6 +132,13 @@ func validateCompose(root string, cf *composeFile, r *Report) {
 			ssec.Fail("RUNNING_IN_CONTAINER is %q, expected \"true\"", v)
 		} else {
 			ssec.Pass("RUNNING_IN_CONTAINER=true")
+		}
+		if email := strings.TrimSpace(env["AGENT_EMAIL"]); email == "" {
+			ssec.Fail("AGENT_EMAIL is not set — agent identity cannot be resolved")
+		} else if !strings.Contains(email, "@") {
+			ssec.Fail("AGENT_EMAIL %q is not a valid email address", email)
+		} else {
+			ssec.Pass("AGENT_EMAIL=%s", email)
 		}
 
 		if hasDataVolume(svc.Volumes) {
