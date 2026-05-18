@@ -69,7 +69,17 @@ Each agent container runs an identical Go binary, parameterised by a shared `con
 - **An IMAP + SMTP server** with one mailbox per agent. You can use any provider; this repo includes a self-hostable docker-mailserver sidecar at `services/dms/` if you want one.
 - **(Optional) tool credentials** for any integrations you enable (Salesforce, WordPress, Buffer, Helpjuice, Box, Xero, Tavily, mxMCP).
 
-## Quick start
+## Easy Start (use your coding agent)
+> ### CONFIGURATION.md
+> A configuration guide for LLM guided deployment. To use simply open an LLM coding agent like, Claude Code, and prompt:
+> * Read the CONFIGURATION.md file and follow its instructions to help me
+    > configure kikubot.
+>
+> Or if you want to configure in your own language:
+> * Read the CONFIGURATION.md file and follow its instructions to help me
+    configure kikubot. Communicate with me in Japanese.
+
+## Quick start (assisted manual installation)
 
 > ### Configuration Dashboard Tool
 > A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already. See `scripts/configurator/README.md`
