@@ -134,7 +134,7 @@ func loadAgentForm(root, email string) (*agentForm, error) {
 		Blacklist:           strings.Join(a.Blacklist, ", "),
 		LLMProvider:         a.LLMProvider,
 		LLMModel:            a.LLMModel,
-		LLMOpenrouterBackup: a.LLMOpenRouterBackup,
+		LLMOpenrouterBackup: strings.Join(a.LLMOpenRouterBackup, ", "),
 		SystemPrompt:        a.SystemPrompt,
 		Role:                a.Role,
 		RoleDesc:            a.Description,
@@ -202,9 +202,9 @@ func (a *agentForm) save(root string) (newEmail string, err error) {
 	def.LLMProvider = strings.TrimSpace(a.LLMProvider)
 	def.LLMModel = strings.TrimSpace(a.LLMModel)
 	if a.LLMProvider == "openrouter" {
-		def.LLMOpenRouterBackup = strings.TrimSpace(a.LLMOpenrouterBackup)
+		def.LLMOpenRouterBackup = splitCSV(a.LLMOpenrouterBackup)
 	} else {
-		def.LLMOpenRouterBackup = ""
+		def.LLMOpenRouterBackup = nil
 	}
 	if v := strings.TrimSpace(prompt); v != "" && v != strings.TrimSpace(r.Common.SystemPrompt) {
 		def.SystemPrompt = prompt

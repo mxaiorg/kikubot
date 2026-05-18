@@ -52,18 +52,9 @@ func (p *OpenRouterProvider) CreateMessage(ctx context.Context, params MessagePa
 		MaxTokens: params.MaxTokens,
 	}
 
-	// Add fallback models from LLM_OPENROUTER_BACKUP (comma-separated).
-	if config.LlmOpenRouterBackup != "" {
-		var models []string
-		for _, m := range strings.Split(config.LlmOpenRouterBackup, ",") {
-			m = strings.TrimSpace(m)
-			if m != "" {
-				models = append(models, m)
-			}
-		}
-		if len(models) > 0 {
-			req.Models = append([]string{params.Model}, models...)
-		}
+	// Add fallback models from llm_openrouter_backup in agents.yaml.
+	if len(config.LlmOpenRouterBackup) > 0 {
+		req.Models = append([]string{params.Model}, config.LlmOpenRouterBackup...)
 	}
 	//log.Printf("MODELS: %s", strings.Join(req.Models, ","))
 

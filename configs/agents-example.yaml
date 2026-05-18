@@ -37,7 +37,7 @@ agents:
     # each delegation round-trip burns a turn.
     llm_provider: openrouter
     llm_model: anthropic/claude-sonnet-4.6
-    llm_openrouter_backup: z-ai/glm-5.1
+    llm_openrouter_backup: [z-ai/glm-5.1, openai/gpt-5.5]
     max_history_chars: 300000
     max_turns: 40
     whitelist: [example.com, agents.example.com]
@@ -52,7 +52,7 @@ agents:
     tools: [mxmcp, salesforce_mcp]
     llm_provider: openrouter
     llm_model: anthropic/claude-sonnet-4.6
-    llm_openrouter_backup: z-ai/glm-5.1
+    llm_openrouter_backup: [z-ai/glm-5.1]
     whitelist: [example.com, agents.example.com]
 
   - name: Gamma
@@ -62,7 +62,7 @@ agents:
     tools: [buffer_mcp, tavily_mcp, vimeo]
     llm_provider: openrouter
     llm_model: anthropic/claude-sonnet-4.6
-    llm_openrouter_backup: z-ai/glm-5.1
+    llm_openrouter_backup: [z-ai/glm-5.1]
     max_tokens: 12000
     agent_timeout: 600
     whitelist: [example.com, agents.example.com]

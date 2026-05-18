@@ -37,7 +37,7 @@ type AgentDef struct {
 	// Per-agent overrides. A nil/zero value means "inherit from common".
 	LLMProvider         string   `yaml:"llm_provider,omitempty" json:"-"`
 	LLMModel            string   `yaml:"llm_model,omitempty" json:"-"`
-	LLMOpenRouterBackup string   `yaml:"llm_openrouter_backup,omitempty" json:"-"`
+	LLMOpenRouterBackup []string `yaml:"llm_openrouter_backup,flow,omitempty" json:"-"`
 	SystemPrompt        string   `yaml:"system_prompt,omitempty" json:"-"`
 	Whitelist           []string `yaml:"whitelist,flow,omitempty" json:"-"`
 	Blacklist           []string `yaml:"blacklist,flow,omitempty" json:"-"`

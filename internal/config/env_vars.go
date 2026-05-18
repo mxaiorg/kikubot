@@ -26,8 +26,8 @@ var (
 	Whitelist           []string
 	Blacklist           []string
 	LlmModel            string
-	LlmProvider         string // "anthropic" (default) or "openrouter"
-	LlmOpenRouterBackup string // comma-separated fallback models for OpenRouter
+	LlmProvider         string   // "anthropic" (default) or "openrouter"
+	LlmOpenRouterBackup []string // ordered fallback models for OpenRouter
 	SysPrompt           string
 	AgentTimeout        int // in seconds
 	MaxTurns            int // max agentic loop turns per inbound message (default 20)
@@ -153,9 +153,9 @@ func Apply(cfg *AgentsConfig) {
 		LlmModel = ""
 	}
 	if agent != nil {
-		LlmOpenRouterBackup = strings.TrimSpace(agent.LLMOpenRouterBackup)
+		LlmOpenRouterBackup = trimAll(agent.LLMOpenRouterBackup)
 	} else {
-		LlmOpenRouterBackup = ""
+		LlmOpenRouterBackup = nil
 	}
 
 	SysPrompt = pickStr(agentStr(agent, func(a *AgentDef) string { return a.SystemPrompt }), common.SystemPrompt)
