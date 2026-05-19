@@ -69,7 +69,7 @@ agents:
     # Any common: field may be overridden here. Missing fields inherit from common:.
     llm_provider: openrouter
     llm_model: anthropic/claude-sonnet-4.6
-    llm_openrouter_backup: z-ai/glm-5.1
+    llm_openrouter_backup: [z-ai/glm-5.1]
     max_history_chars: 300000
     max_turns: 40
     whitelist: [example.com, agents.example.com]
@@ -113,7 +113,7 @@ Ask the user how many agents they want, then for each entry under `agents:` coll
 | `whitelist` / `blacklist` | "Allowed / denied senders, list of emails or domains." | Mutually exclusive. |
 | `llm_provider` | "Provider: `anthropic` or `openrouter`." | Must have its API key set in `secrets.env`. |
 | `llm_model` | "Model id (provider-specific tag)." | e.g. `claude-sonnet-4-6` or `anthropic/claude-sonnet-4.6`. |
-| `llm_openrouter_backup` | "Comma-separated fallback model list." | Only ask if provider is `openrouter`. |
+| `llm_openrouter_backup` | "Ordered list of fallback model ids." | YAML list. Only ask if provider is `openrouter`. |
 | `system_prompt` | "Override the default prompt for this agent." | Optional. May include `{{coworkers}}`. If the agent is a coordinator, offer to seed from `coordinator_system_prompt`. |
 | `max_history_chars` / `max_turns` | "Override conversation budgets?" | Optional. Coordinators typically need a higher `max_turns` (e.g. `40`). |
 
