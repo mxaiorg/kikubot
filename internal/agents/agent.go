@@ -147,9 +147,14 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 			return fmt.Errorf("context cancelled before turn %d: %w", turn, ctx.Err())
 		}
 
-		// Trim history if it exceeds the configured character limit.
+		// Compute the message list to send. Trim/compress runs on a local
+		// slice — a.history retains the full uncompressed turns so the
+		// memory file persists real tool_result content for future replays
+		// in the thread. (Trimming used to mutate a.history, which made
+		// each save permanently lose tool outputs.)
+		outgoing := a.history
 		if config.MaxHistoryChars > 0 {
-			a.history = trimHistory(a.history, config.MaxHistoryChars)
+			outgoing = trimHistory(a.history, config.MaxHistoryChars)
 		}
 
 		params := provider.MessageParams{
@@ -157,7 +162,7 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 			MaxTokens:      config.MaxTokens,
 			SystemStable:   stableSystem,
 			SystemVolatile: volatileSystem,
-			Messages:       a.history,
+			Messages:       outgoing,
 			Tools:          sdkTools,
 		}
 
@@ -296,13 +301,121 @@ func toToolDefs(defs []tools.ToolDefinition) []provider.ToolDef {
 	return out
 }
 
-// historySize returns the approximate character count of serialized history.
-func historySize(history []anthropic.MessageParam) int {
-	b, err := json.Marshal(history)
-	if err != nil {
+// Approximate token cost per native attachment block. Anthropic tokenises
+// PDFs and images separately from the JSON payload, so a base64 PDF that
+// serialises to multiple megabytes still bills only a few thousand tokens.
+// These constants are conservative upper bounds expressed in characters
+// (≈4 chars/token), used by effectiveSize to budget attachments fairly.
+const (
+	approxImageBlockChars = 6000  // ≈1500 tokens, Anthropic image flat rate
+	approxPDFBlockChars   = 12000 // ≈3000 tokens, native PDF flat rate
+)
+
+// effectiveSize returns an approximate character count of history that
+// excludes base64 attachment payloads (PDFs, images). The raw JSON size
+// (json.Marshal) includes the full base64 blob, which is 10-100× larger
+// than what the Anthropic API actually bills as input tokens — that API
+// tokenises native PDFs and images separately. Using effectiveSize as
+// the trim threshold stops trim from firing spuriously when an email
+// has a multi-MB attachment, which was destroying tool_result content
+// each turn.
+func effectiveSize(history []anthropic.MessageParam) int {
+	total := 0
+	for _, m := range history {
+		total += len(m.Role) + 8 // role + small per-message envelope
+		for _, block := range m.Content {
+			total += contentBlockSize(block)
+		}
+	}
+	return total
+}
+
+func contentBlockSize(block anthropic.ContentBlockParamUnion) int {
+	switch {
+	case block.OfText != nil:
+		return len(block.OfText.Text)
+	case block.OfToolUse != nil:
+		size := len(block.OfToolUse.Name) + len(block.OfToolUse.ID)
+		if raw, err := json.Marshal(block.OfToolUse.Input); err == nil {
+			size += len(raw)
+		}
+		return size
+	case block.OfToolResult != nil:
+		size := len(block.OfToolResult.ToolUseID)
+		for _, c := range block.OfToolResult.Content {
+			if c.OfText != nil {
+				size += len(c.OfText.Text)
+			}
+			// Image content inside a tool_result counts at the flat image rate.
+			if c.OfImage != nil {
+				size += approxImageBlockChars
+			}
+		}
+		return size
+	case block.OfImage != nil:
+		// Flat rate — base64 bytes are not what the API bills.
+		if block.OfImage.Source.OfURL != nil {
+			return len(block.OfImage.Source.OfURL.URL)
+		}
+		return approxImageBlockChars
+	case block.OfDocument != nil:
+		src := block.OfDocument.Source
+		switch {
+		case src.OfText != nil:
+			return len(src.OfText.Data)
+		case src.OfURL != nil:
+			return len(src.OfURL.URL)
+		case src.OfBase64 != nil:
+			return approxPDFBlockChars
+		}
 		return 0
 	}
-	return len(b)
+	return 0
+}
+
+// StripAttachmentBlobs returns a deep-copied history with base64 image
+// and PDF attachment payloads replaced by lightweight text stubs. The
+// EmailSummary text block in each inbound user message already lists
+// attachment names and sizes, so the stub is a hint, not the surrogate.
+//
+// Why this matters: native PDF/image blocks balloon the persisted memory
+// file by an order of magnitude (a 1.8 MB PDF serialises to ~2.4 MB of
+// base64). On a follow-up email in the same thread, that whole base64
+// payload reloads into memory and re-inflates the JSON size estimate.
+// Within a single HandleMessage run the model has already processed the
+// attachment via the live (uncompressed) a.history — by the time we save
+// to disk, the document's contribution to the conversation has been
+// "absorbed" into subsequent tool_use / text turns and can be dropped.
+//
+// Document blocks with text or URL sources are left intact (they are
+// already small). tool_result image content is left intact (it belongs
+// to a tool's reply, not to the inbound email).
+func StripAttachmentBlobs(history []anthropic.MessageParam) []anthropic.MessageParam {
+	out := make([]anthropic.MessageParam, len(history))
+	for i, m := range history {
+		newContent := make([]anthropic.ContentBlockParamUnion, 0, len(m.Content))
+		for _, block := range m.Content {
+			if block.OfImage != nil && block.OfImage.Source.OfBase64 != nil {
+				newContent = append(newContent, anthropic.NewTextBlock(
+					"[image attachment elided from persisted history — original was processed in-run]",
+				))
+				continue
+			}
+			if block.OfDocument != nil && block.OfDocument.Source.OfBase64 != nil {
+				name := block.OfDocument.Title.Value
+				stub := "[PDF attachment elided from persisted history — original was processed in-run]"
+				if name != "" {
+					stub = fmt.Sprintf("[PDF attachment %q elided from persisted history — original was processed in-run]", name)
+				}
+				newContent = append(newContent, anthropic.NewTextBlock(stub))
+				continue
+			}
+			newContent = append(newContent, block)
+		}
+		m.Content = newContent
+		out[i] = m
+	}
+	return out
 }
 
 // trimHistory reduces serialized history below maxChars by dropping oldest
@@ -323,7 +436,7 @@ func historySize(history []anthropic.MessageParam) int {
 // AgentEmails not initialized), behaviour falls back to the pre-anchor logic:
 // oldest cutpoint whose tail fits, else newest.
 func trimHistory(history []anthropic.MessageParam, maxChars int) []anthropic.MessageParam {
-	size := historySize(history)
+	size := effectiveSize(history)
 	if size <= maxChars {
 		return history
 	}
@@ -365,7 +478,7 @@ func trimHistory(history []anthropic.MessageParam, maxChars int) []anthropic.Mes
 	// the active request visible even if the tail still exceeds maxChars.
 	chosen := candidates[0]
 	for _, idx := range candidates {
-		if historySize(history[idx:]) <= maxChars {
+		if effectiveSize(history[idx:]) <= maxChars {
 			chosen = idx
 			break
 		}
@@ -373,13 +486,13 @@ func trimHistory(history []anthropic.MessageParam, maxChars int) []anthropic.Mes
 
 	trimmed := history[chosen:]
 	log.Printf("history trimmed to %d messages (%d chars), starting at index %d (anchor=%d)",
-		len(trimmed), historySize(trimmed), chosen, anchor)
+		len(trimmed), effectiveSize(trimmed), chosen, anchor)
 
 	// If we're still over budget — typically because the anchor-pinned tail
 	// is itself oversize — compress the largest tool_result blocks in the
 	// tail. Deterministic, preserves tool_use ↔ tool_result pairing, and
 	// the assistant turns that follow have already digested the raw output.
-	if historySize(trimmed) > maxChars {
+	if effectiveSize(trimmed) > maxChars {
 		trimmed = compressToolResults(trimmed, maxChars)
 	}
 	return trimmed
@@ -433,7 +546,7 @@ func compressToolResults(history []anthropic.MessageParam, maxChars int) []anthr
 
 	const stubFmt = "[compressed for context window: %d chars elided]"
 	for _, r := range refs {
-		if historySize(out) <= maxChars {
+		if effectiveSize(out) <= maxChars {
 			break
 		}
 		tr := out[r.msgIdx].Content[r.blockIdx].OfToolResult
@@ -445,7 +558,7 @@ func compressToolResults(history []anthropic.MessageParam, maxChars int) []anthr
 		out[r.msgIdx].Content[r.blockIdx].OfToolResult = &fixed
 	}
 
-	final := historySize(out)
+	final := effectiveSize(out)
 	if final > maxChars {
 		log.Printf("history still %d chars after compressing tool results (limit %d); proceeding oversize",
 			final, maxChars)

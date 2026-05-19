@@ -187,7 +187,14 @@ func process(parent context.Context) {
 			// Always save history — even on timeout/error the agent may have
 			// completed useful work (tool calls, partial results) that we want
 			// to preserve for the next attempt.
-			err2 := services.SaveMemoryHistory(parent, agent.History(), email.MessageId)
+			//
+			// StripAttachmentBlobs removes base64 PDF/image payloads before
+			// persisting. The model already processed them in this run; the
+			// EmailSummary block (filename, size) plus subsequent assistant
+			// turns carry forward whatever was learned. Keeping the bytes on
+			// disk just inflates memory files and re-bloats reload for
+			// follow-up emails in the thread.
+			err2 := services.SaveMemoryHistory(parent, agents.StripAttachmentBlobs(agent.History()), email.MessageId)
 			if err2 != nil {
 				log.Println("error saving memory history:", err2)
 			}
