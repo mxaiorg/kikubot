@@ -35,7 +35,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Provider abstraction (`internal/provider/`)
 
-`provider.Provider` interface with two impls — `anthropic.go` (default) and `openrouter.go` (OpenAI-compatible). Selection: `LLM_PROVIDER` env var; if unset and `LLM_MODEL` has a vendor prefix (`anthropic/…`), OpenRouter is auto-selected. `LLM_OPENROUTER_BACKUP` is a comma-separated fallback list, OpenRouter-only.
+`provider.Provider` interface with two impls — `anthropic.go` (default) and `openrouter.go` (OpenAI-compatible). Selection comes from `llm_provider` in agents.yaml (common or per-agent override); if unset and `llm_model` has a vendor prefix (`anthropic/…`), OpenRouter is auto-selected. `llm_openrouter_backup` is a YAML list of fallback model ids, OpenRouter-only.
 
 ### Tools (`internal/tools/`)
 

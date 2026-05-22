@@ -121,6 +121,14 @@ OTHER ENDPOINTS:
   List pages: curl -s -H "Authorization: Basic $AUTH" "$URL/wp-json/wp/v2/pages?per_page=50" | jq '.[] | {id, slug, title: .title.rendered}'
   List posts: curl -s -H "Authorization: Basic $AUTH" "$URL/wp-json/wp/v2/posts?per_page=50"
   Create post: curl -s -H "Authorization: Basic $AUTH" -X POST "$URL/wp-json/wp/v2/posts" -H "Content-Type: application/json" -d @/tmp/wp_payload.json
+
+UPLOADING AN INBOUND ATTACHMENT TO THE MEDIA LIBRARY:
+  If the user (or a coworker via X-Forwarded) attached an image/file you need to host, first
+  materialise it to disk with save_attachment (the bytes are NOT readable from the inline
+  image block you see in the conversation), then POST it:
+    curl -s -H "Authorization: Basic $AUTH" -H "Content-Disposition: attachment; filename=NAME.png" \
+         -H "Content-Type: image/png" --data-binary @/tmp/NAME.png "$URL/wp-json/wp/v2/media" | jq '{id, source_url}'
+  Use the returned source_url anywhere a public image URL is required (Buffer drafts, post bodies, etc.).
 `,
 		authHeader,
 		config.WebSiteUrl), nil

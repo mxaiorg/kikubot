@@ -82,23 +82,33 @@ func readMemoryFile(threadRoot string) (*Memory, error) {
 		Status:        raw.Status,
 		StatusUpdated: raw.StatusUpdated,
 	}
-	// Wrap each persisted message as raw JSON so the SDK never re-serialises
-	// the content blocks through its own (potentially buggy) ToParam path.
-	// Older history may contain server-side tool-result blocks whose
-	// `content` field was corrupted by the SDK streaming accumulator (see
-	// provider/anthropic.go) — drop those messages entirely since we can't
-	// reconstruct them.
+	// Sanitize and trim raw history BEFORE wrapping. The wrapping below uses
+	// param.Override which zeroes the public Role/Content fields (the raw
+	// JSON is held opaquely for serialisation only) — so any field-based
+	// check applied to a wrapped message misfires. Historical bug: doing the
+	// orphan-trim on wrapped messages saw Role=="" on every message and
+	// dropped the entire history on every load.
+	//
+	// Order of operations:
+	//   1. Drop messages with corrupt server-side tool-result blocks (a
+	//      known SDK streaming-accumulator bug) — we can't reconstruct them.
+	//   2. Sanitise citations / server_tool_use that the API would reject.
+	//   3. Trim leading messages that would be invalid after (1) removed
+	//      earlier turns (orphaned tool_results, non-user leads).
+	//   4. Wrap each surviving raw message via param.Override so the SDK
+	//      doesn't re-serialise it through its own (potentially buggy)
+	//      ToParam path.
+	var sanitized []json.RawMessage
 	for _, msgRaw := range raw.History {
 		if messageHasCorruptServerResult(msgRaw) {
 			continue
 		}
-		sanitized := stripCitationsFromMessage(msgRaw)
-		m.History = append(m.History, param.Override[anthropic.MessageParam](sanitized))
+		sanitized = append(sanitized, stripCitationsFromMessage(msgRaw))
 	}
-	// Trim any leading user message that references a now-dropped tool_use,
-	// and trim leading tool_result-only user messages that no longer have a
-	// preceding assistant tool_use to answer.
-	m.History = trimOrphanedLeadingMessages(m.History)
+	sanitized = trimOrphanedLeadingMessagesRaw(sanitized)
+	for _, msgRaw := range sanitized {
+		m.History = append(m.History, param.Override[anthropic.MessageParam](msgRaw))
+	}
 	return &m, nil
 }
 
@@ -132,22 +142,26 @@ func messageHasCorruptServerResult(raw json.RawMessage) bool {
 	return false
 }
 
-// trimOrphanedLeadingMessages drops leading messages that would be invalid
-// after earlier messages were removed: a leading non-user message, or a
-// leading user message consisting of tool_result blocks whose matching
-// tool_use lives in a dropped assistant turn.
-func trimOrphanedLeadingMessages(history []anthropic.MessageParam) []anthropic.MessageParam {
+// trimOrphanedLeadingMessagesRaw drops leading messages that would be
+// invalid as the first turn of a re-submitted conversation: a leading
+// non-user message, or a leading user message composed entirely of
+// tool_result blocks whose matching tool_use lives in a now-dropped
+// assistant turn.
+//
+// Operates on raw JSON because this runs on the load path before
+// param.Override wrapping (the wrapper hides Role/Content from any
+// field-based check). A message that fails to parse as a MessageParam
+// shape is treated as orphaned.
+func trimOrphanedLeadingMessagesRaw(history []json.RawMessage) []json.RawMessage {
 	for len(history) > 0 {
-		if history[0].Role != anthropic.MessageParamRoleUser {
+		role, hasToolResult, ok := peekRoleAndToolResult(history[0])
+		if !ok {
 			history = history[1:]
 			continue
 		}
-		hasToolResult := false
-		for _, b := range history[0].Content {
-			if b.OfToolResult != nil {
-				hasToolResult = true
-				break
-			}
+		if role != string(anthropic.MessageParamRoleUser) {
+			history = history[1:]
+			continue
 		}
 		if hasToolResult {
 			history = history[1:]
@@ -156,6 +170,28 @@ func trimOrphanedLeadingMessages(history []anthropic.MessageParam) []anthropic.M
 		break
 	}
 	return history
+}
+
+// peekRoleAndToolResult inspects a raw JSON-encoded MessageParam and
+// returns its role plus whether any of its content blocks is a
+// tool_result. ok is false when the JSON does not parse as a message.
+func peekRoleAndToolResult(raw json.RawMessage) (role string, hasToolResult bool, ok bool) {
+	var probe struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return "", false, false
+	}
+	for _, b := range probe.Content {
+		if b.Type == "tool_result" {
+			hasToolResult = true
+			break
+		}
+	}
+	return probe.Role, hasToolResult, true
 }
 
 // serverToolUseAllowedFields are the only keys the API accepts on a

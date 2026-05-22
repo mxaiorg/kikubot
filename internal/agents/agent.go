@@ -319,13 +319,14 @@ const (
 // the trim threshold stops trim from firing spuriously when an email
 // has a multi-MB attachment, which was destroying tool_result content
 // each turn.
+//
+// Messages loaded from memory are wrapped via param.Override and have
+// empty public Role/Content fields; viewMessage transparently routes
+// those through a raw-JSON peek so the size estimate is accurate.
 func effectiveSize(history []anthropic.MessageParam) int {
 	total := 0
 	for _, m := range history {
-		total += len(m.Role) + 8 // role + small per-message envelope
-		for _, block := range m.Content {
-			total += contentBlockSize(block)
-		}
+		total += viewMessage(m).size
 	}
 	return total
 }
@@ -443,10 +444,13 @@ func trimHistory(history []anthropic.MessageParam, maxChars int) []anthropic.Mes
 
 	log.Printf("history size %d chars exceeds limit %d, trimming oldest messages", size, maxChars)
 
-	// Collect safe cutpoint indices (ascending).
+	// Collect safe cutpoint indices (ascending). viewMessage handles
+	// loaded (param.Override-wrapped) messages whose public Role/Content
+	// fields are unset.
 	var cutpoints []int
 	for i, m := range history {
-		if m.Role == anthropic.MessageParamRoleUser && !hasToolResult(m) {
+		v := viewMessage(m)
+		if v.role == anthropic.MessageParamRoleUser && !v.hasToolResult {
 			cutpoints = append(cutpoints, i)
 		}
 	}
@@ -576,47 +580,40 @@ func findAnchor(history []anthropic.MessageParam) int {
 		return -1
 	}
 	for i := len(history) - 1; i >= 0; i-- {
-		m := history[i]
-		if m.Role != anthropic.MessageParamRoleUser || hasToolResult(m) {
+		v := viewMessage(history[i])
+		if v.role != anthropic.MessageParamRoleUser || v.hasToolResult {
 			continue
 		}
-		from := extractFromField(m)
-		if from == "" {
+		if v.from == "" {
 			continue
 		}
-		if !config.AgentEmails[strings.ToLower(from)] {
+		if !config.AgentEmails[strings.ToLower(v.from)] {
 			return i
 		}
 	}
 	return -1
 }
 
-// extractFromField pulls the bare "from" address out of the first text block
-// of a user message, assuming the block holds an EmailSummary JSON produced
-// by Email.UserMessage. The stored From is a formatted RFC 5322 address
-// (e.g. `"Kiku" <kiku@agents.mxhero.com>`), so we parse it down to the bare
-// mailbox before returning. Returns "" if the block isn't parseable JSON or
-// has no from.
-func extractFromField(m anthropic.MessageParam) string {
-	for _, block := range m.Content {
-		if block.OfText == nil {
-			continue
-		}
-		var probe struct {
-			From string `json:"from"`
-		}
-		if err := json.Unmarshal([]byte(block.OfText.Text), &probe); err != nil {
-			return ""
-		}
-		if probe.From == "" {
-			return ""
-		}
-		if addr, err := netmail.ParseAddress(probe.From); err == nil {
-			return addr.Address
-		}
-		return probe.From
+// parseEmailSummaryFrom pulls the bare "from" address out of the
+// EmailSummary JSON that Email.UserMessage embeds into the first text
+// block of each inbound user message. The stored From is a formatted
+// RFC 5322 address (e.g. `"Kiku" <kiku@agents.mxhero.com>`), parsed down
+// to the bare mailbox. Returns "" when text isn't an EmailSummary or has
+// no from field.
+func parseEmailSummaryFrom(text string) string {
+	var probe struct {
+		From string `json:"from"`
 	}
-	return ""
+	if err := json.Unmarshal([]byte(text), &probe); err != nil {
+		return ""
+	}
+	if probe.From == "" {
+		return ""
+	}
+	if addr, err := netmail.ParseAddress(probe.From); err == nil {
+		return addr.Address
+	}
+	return probe.From
 }
 
 // truncateToolResult clamps result to maxChars, preserving valid UTF-8 and
@@ -676,14 +673,161 @@ func sanitizeTruncatedToolInputs(resp *provider.MessageResponse) map[string]stri
 	return truncated
 }
 
-// hasToolResult reports whether the message contains any tool_result blocks.
-// A leading user message with tool_result blocks is invalid because the
-// tool_use they reference would be in a prior (trimmed) assistant message.
-func hasToolResult(m anthropic.MessageParam) bool {
-	for _, block := range m.Content {
-		if block.OfToolResult != nil {
-			return true
+// messageView is the resolved view of a MessageParam — works for both
+// fresh messages (built this turn) and messages loaded from memory and
+// wrapped via param.Override. The wrapping is opaque (it zeroes the
+// public Role/Content fields and stores the raw JSON in a hidden
+// metadata field for serialisation), so any field-based check on a
+// loaded message would otherwise misfire. Route all role / from /
+// tool_result / size lookups through viewMessage.
+type messageView struct {
+	role          anthropic.MessageParamRole
+	from          string
+	hasToolResult bool
+	size          int
+}
+
+// viewMessage returns a messageView for either a fresh or a loaded
+// (param.Override-wrapped) MessageParam.
+func viewMessage(m anthropic.MessageParam) messageView {
+	if ovr, ok := m.Overrides(); ok {
+		if raw, isJSON := ovr.(json.RawMessage); isJSON {
+			return viewMessageRaw(raw)
 		}
 	}
-	return false
+	v := messageView{
+		role: m.Role,
+		size: len(m.Role) + 8, // role + small per-message envelope
+	}
+	var sawText bool
+	for _, block := range m.Content {
+		v.size += contentBlockSize(block)
+		if block.OfToolResult != nil {
+			v.hasToolResult = true
+		}
+		if !sawText && block.OfText != nil {
+			sawText = true
+			v.from = parseEmailSummaryFrom(block.OfText.Text)
+		}
+	}
+	return v
+}
+
+// viewMessageRaw is viewMessage's slow path for messages loaded from
+// memory and wrapped via param.Override. We peek at the raw JSON to
+// recover the same fields the fresh path reads off the struct.
+func viewMessageRaw(raw json.RawMessage) messageView {
+	var probe struct {
+		Role    string            `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return messageView{size: len(raw)}
+	}
+	v := messageView{
+		role: anthropic.MessageParamRole(probe.Role),
+		size: len(probe.Role) + 8,
+	}
+	var sawText bool
+	for _, blockRaw := range probe.Content {
+		v.size += contentBlockSizeRaw(blockRaw)
+		var typePeek struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(blockRaw, &typePeek); err != nil {
+			continue
+		}
+		switch typePeek.Type {
+		case "tool_result":
+			v.hasToolResult = true
+		case "text":
+			if !sawText {
+				sawText = true
+				var textPeek struct {
+					Text string `json:"text"`
+				}
+				if json.Unmarshal(blockRaw, &textPeek) == nil {
+					v.from = parseEmailSummaryFrom(textPeek.Text)
+				}
+			}
+		}
+	}
+	return v
+}
+
+// contentBlockSizeRaw mirrors contentBlockSize for a raw JSON content
+// block (the wrapped-message path). Kept in sync with the fresh-message
+// branches: text blocks count their text length, tool_use counts
+// name+id+input, tool_result counts tool_use_id plus text/image content
+// at flat rates, native PDFs/images use the same flat-rate constants.
+func contentBlockSizeRaw(blockRaw json.RawMessage) int {
+	var peek struct {
+		Type      string          `json:"type"`
+		Text      string          `json:"text"`
+		Name      string          `json:"name"`
+		ID        string          `json:"id"`
+		Input     json.RawMessage `json:"input"`
+		ToolUseID string          `json:"tool_use_id"`
+		Content   json.RawMessage `json:"content"`
+		Source    json.RawMessage `json:"source"`
+	}
+	if err := json.Unmarshal(blockRaw, &peek); err != nil {
+		return 0
+	}
+	switch peek.Type {
+	case "text":
+		return len(peek.Text)
+	case "tool_use":
+		return len(peek.Name) + len(peek.ID) + len(peek.Input)
+	case "tool_result":
+		size := len(peek.ToolUseID)
+		var inner []json.RawMessage
+		// tool_result.content may be a string or an array of content blocks.
+		if len(peek.Content) > 0 && peek.Content[0] == '[' {
+			_ = json.Unmarshal(peek.Content, &inner)
+		}
+		for _, c := range inner {
+			var ip struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(c, &ip) != nil {
+				continue
+			}
+			switch ip.Type {
+			case "text":
+				size += len(ip.Text)
+			case "image":
+				size += approxImageBlockChars
+			}
+		}
+		return size
+	case "image":
+		var src struct {
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		}
+		if json.Unmarshal(peek.Source, &src) == nil && src.Type == "url" {
+			return len(src.URL)
+		}
+		return approxImageBlockChars
+	case "document":
+		var src struct {
+			Type string `json:"type"`
+			URL  string `json:"url"`
+			Data string `json:"data"`
+		}
+		if json.Unmarshal(peek.Source, &src) == nil {
+			switch src.Type {
+			case "text":
+				return len(src.Data)
+			case "url":
+				return len(src.URL)
+			case "base64":
+				return approxPDFBlockChars
+			}
+		}
+		return 0
+	}
+	return 0
 }
