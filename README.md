@@ -242,6 +242,8 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 
 ### Writing your own tool
 
+> 🤖 We are successfully adding tools via Claude Code. Claude will review existing tools and build yours including adding it to the registry, etc. Your tool can be an MCP, a CLI, a web API, etc. - Claude builds them all. Typically it takes less than 10 minutes to build a tool in this manner.
+
 Every tool is a `ToolDefinition` value. The minimum:
 
 ```go
