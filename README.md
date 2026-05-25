@@ -11,10 +11,6 @@
 
 ---
 
-> **Disclaimer.** This repository is a public mirror of an internally developed project. It is provided as-is for community use and learning. We do not guarantee response times on issues or PRs, and development priorities are driven by internal needs. Contributions are welcome but may not be merged.
-
-> **Note.** This project is in active development. Compatibility with microsoft based emails (e.g., Office 365) is not yet fully tested.
-
 ## Overview
 
 Kikubot turns an email account into an autonomous agent. Each running container polls one IMAP mailbox, runs every new email through an LLM agentic loop with a configurable tool set, and replies via SMTP. Agents collaborate by emailing each other, so a typical deployment looks like several agents — a coordinator and a few specialists — sharing one mail server.
@@ -397,6 +393,14 @@ go run -tags=dev cmd/kikubot/main.go
 ```
 
 Architectural notes for code changes live in [`CLAUDE.md`](CLAUDE.md).
+
+
+## About
+
+> **About this repo.** Kikubot is developed primarily for our own production use at mxHERO and released here under MIT so the community can build on it. We're a small team, so issue and PR turnaround varies — but we read everything, and we welcome contributions. See CONTRIBUTING.md for how we evaluate changes and where we most need help..
+
+> **Status.** This project is in active development. Compatibility with microsoft based emails (e.g., Office 365) is not yet fully tested.
+
 
 ## Naming
 
