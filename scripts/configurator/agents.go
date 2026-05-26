@@ -2,11 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"kikubot/internal/config"
+
+	"gopkg.in/yaml.v3"
 )
 
 // agentSummary is a row in the agents list.
@@ -359,18 +363,37 @@ func saveCommonDefaults(root string, d *commonDefaults) error {
 
 // commonPromptDefaults returns (SystemPrompt, CoordinatorSystemPrompt) from
 // agents.yaml's common: block, falling back to the in-code default for the
-// base system prompt.
+// base system prompt and to configs/agents-example.yaml's common block for
+// the coordinator prompt when agents.yaml doesn't define one.
 func commonPromptDefaults(root string) (system, coordinator string) {
 	r, err := loadRoster(root)
-	if err != nil || r == nil {
-		return defaultSystemPrompt, ""
+	if err == nil && r != nil {
+		system = r.Common.SystemPrompt
+		coordinator = r.Common.CoordinatorSystemPrompt
 	}
-	system = r.Common.SystemPrompt
 	if system == "" {
 		system = defaultSystemPrompt
 	}
-	coordinator = r.Common.CoordinatorSystemPrompt
+	if coordinator == "" {
+		coordinator = exampleCoordinatorPrompt(root)
+	}
 	return
+}
+
+// exampleCoordinatorPrompt loads coordinator_system_prompt from
+// configs/agents-example.yaml's common: block. Returns "" if the file is
+// missing or unparseable — the example file is the source of the seed prompt
+// surfaced by the "Paste Coordinator prompt" button.
+func exampleCoordinatorPrompt(root string) string {
+	b, err := os.ReadFile(filepath.Join(root, "configs", "agents-example.yaml"))
+	if err != nil {
+		return ""
+	}
+	var r roster
+	if err := yaml.Unmarshal(b, &r); err != nil {
+		return ""
+	}
+	return r.Common.CoordinatorSystemPrompt
 }
 
 // defaultSystemPrompt is the seed used when agents.yaml hasn't been written yet.

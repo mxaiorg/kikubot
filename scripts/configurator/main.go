@@ -76,6 +76,7 @@ func main() {
 	mux.HandleFunc("/agents/edit", s.handleAgentEdit)
 	mux.HandleFunc("/agents/save", s.handleAgentSave)
 	mux.HandleFunc("/email-service", s.handleEmailService)
+	mux.HandleFunc("/email-service/cert", s.handleEmailServiceCert)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 
 	httpSrv := &http.Server{

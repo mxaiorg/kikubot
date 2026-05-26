@@ -12,7 +12,10 @@
     return any;
   };
   document.querySelectorAll("form").forEach((form) => {
-    const submit = form.querySelector('button[type="submit"], button.primary');
+    // Skip submit buttons with a [formaction] override — they're side-actions
+    // (e.g. "Generate self-signed certificate") that post to a different
+    // endpoint and shouldn't be gated by the main form's dirty state.
+    const submit = form.querySelector('button[type="submit"]:not([formaction]), button.primary:not([formaction])');
     if (submit) submit.disabled = true;
     const markDirty = () => {
       if (dirtyForms.has(form)) return;
@@ -98,6 +101,14 @@
       // Dispatch so dirty-tracking (and any listeners) see the change.
       ta.dispatchEvent(new Event("input", { bubbles: true }));
     });
+  });
+
+  // ---- generic data-confirm submit guard ----
+  // Any submit button with data-confirm="…" prompts before submitting.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[type=submit][data-confirm]");
+    if (!btn) return;
+    if (!confirm(btn.dataset.confirm)) e.preventDefault();
   });
 
   // ---- email service: enabled toggle ----
@@ -281,9 +292,30 @@
       activeAnchor = btn;
       popover.textContent = btn.dataset.info || "";
       popover.classList.remove("is-hidden");
+      // Place tentatively so the browser lays the popover out; then measure
+      // and adjust to keep it inside the viewport.
+      popover.style.top = "0px";
+      popover.style.left = "0px";
       const r = btn.getBoundingClientRect();
-      popover.style.top = (r.bottom + window.scrollY + 6) + "px";
-      popover.style.left = (r.left + window.scrollX) + "px";
+      const pr = popover.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      const vh = document.documentElement.clientHeight;
+      const gap = 6, margin = 8;
+      // Vertical: prefer below; flip above when there's not enough room below
+      // and more room above (tall tooltips near the bottom of the page).
+      const spaceBelow = vh - r.bottom;
+      const spaceAbove = r.top;
+      const top = (pr.height + gap > spaceBelow && spaceAbove > spaceBelow)
+        ? r.top + window.scrollY - pr.height - gap
+        : r.bottom + window.scrollY + gap;
+      // Horizontal: left-align with the icon, clamp to viewport.
+      let left = r.left + window.scrollX;
+      const maxLeft = window.scrollX + vw - pr.width - margin;
+      const minLeft = window.scrollX + margin;
+      if (left > maxLeft) left = maxLeft;
+      if (left < minLeft) left = minLeft;
+      popover.style.top = top + "px";
+      popover.style.left = left + "px";
     };
 
     // Toggle on icon click. preventDefault so the surrounding <label> doesn't

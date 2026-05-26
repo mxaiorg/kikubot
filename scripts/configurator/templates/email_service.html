@@ -57,11 +57,16 @@
         <p class="status-ok">✅ fullchain.pem found</p>
         <p class="status-ok">✅ privkey.pem found</p>
       {{else}}
-        <p class="hint">Provide your agent email domain's private key and full certificate chain. Replace <code>services/dms/certs/fullchain-update.pem</code> and <code>services/dms/certs/privkey-update.pem</code> with your certificate, then save them as <code>fullchain.pem</code> and <code>privkey.pem</code> respectively. </p>
-        <p class="hint">For instructions on how to create and use a self-signed certificate see `services/dms/README.md`</p>
+        <p class="hint">Provide your agent email domain's private key and full certificate chain. Replace <code>services/dms/certs/fullchain-update.pem</code> and <code>services/dms/certs/privkey-update.pem</code> with your certificate, then save them as <code>fullchain.pem</code> and <code>privkey.pem</code> respectively.</p>
         {{if not .SSL.FullchainExists}}<p class="status-bad">❌ fullchain.pem not found</p>{{end}}
         {{if not .SSL.PrivkeyExists}}<p class="status-bad">❌ privkey.pem not found</p>{{end}}
       {{end}}
+      <div class="actions">
+        <button type="submit" class="ghost" formaction="/email-service/cert" formnovalidate{{if .SSL.BothPresent}} data-confirm="Overwrite the existing certificate in services/dms/certs/?"{{end}}>
+          {{if .SSL.BothPresent}}Regenerate{{else}}Generate{{end}} self-signed certificate
+        </button>
+        {{infoIcon "Creates services/dms/certs/fullchain.pem and privkey.pem using the Email Server Hostname and Agent email domain fields above. RSA-4096, valid 10 years.\n\nSet email_insecure_tls: true under common: in configs/agents.yaml so agents accept it when talking to their own mailbox.\n\nImpact on external mail:\n• Inter-agent traffic: works.\n• External senders → agents: most MTAs (Gmail, Microsoft, etc.) use opportunistic TLS and will accept the self-signed cert or fall back to plaintext. Strict senders enforcing MTA-STS or DANE on your domain will refuse delivery — only relevant if you've published those policies yourself.\n• Agents → external recipients: unaffected. DMS is the client there; the recipient's CA-signed cert is what's validated.\n• Human IMAP clients (Thunderbird, etc.): will show a cert warning until the cert is trusted manually.\n\nFor strict deliverability or clean IMAP for humans, use a real CA cert (Let's Encrypt works with DMS out of the box)."}}
+      </div>
     </fieldset>
   </fieldset>
 

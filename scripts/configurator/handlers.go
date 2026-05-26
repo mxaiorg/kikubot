@@ -258,6 +258,48 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "email_service", pageData{Active: "email", Data: view})
 }
 
+// handleEmailServiceCert generates a self-signed cert from the submitted
+// hostname/agent_domain values and re-renders the page. Uses the submitted
+// form values (not the on-disk config) so unsaved edits to the hostname/domain
+// are honoured and preserved in the re-rendered form.
+func (s *server) handleEmailServiceCert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/email-service", http.StatusSeeOther)
+		return
+	}
+	_ = r.ParseForm()
+	hostname := strings.TrimSpace(r.FormValue("hostname"))
+	domain := strings.TrimSpace(r.FormValue("agent_domain"))
+	if domain == "" {
+		domain = hostnameDomain(hostname)
+	}
+
+	c := &emailServiceConfig{
+		Enabled:         r.FormValue("enabled") == "1",
+		Hostname:        hostname,
+		AgentDomain:     domain,
+		LimitDelivery:   r.FormValue("limit_delivery") == "1",
+		DeliveryDomains: splitCSV(r.FormValue("delivery_domains")),
+		LimitAccept:     r.FormValue("limit_accept") == "1",
+		AcceptDomains:   splitCSV(r.FormValue("accept_domains")),
+	}
+
+	var flashKind, flashMsg string
+	if err := generateSelfSignedCert(s.root, hostname, domain); err != nil {
+		flashKind = "error"
+		flashMsg = "Certificate generation failed: " + err.Error()
+	} else {
+		flashKind = "success"
+		flashMsg = "Generated self-signed certificate in services/dms/certs/. Remember to set email_insecure_tls: true under common: in configs/agents.yaml."
+	}
+
+	view := emailServiceView{
+		emailServiceConfig: c,
+		SSL:                loadSSLCertStatus(s.root),
+	}
+	s.render(w, r, "email_service", pageData{Active: "email", Data: view, Flash: flashMsg, FlashKind: flashKind})
+}
+
 // templateFuncs is exposed for parsing.
 var templateFuncs = template.FuncMap{
 	"joinCSV":       joinCSV,

@@ -225,6 +225,7 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | Key                    | What it does                                                                                          |
 |------------------------|-------------------------------------------------------------------------------------------------------|
 | `report`               | Send a structured reply to the user (used by coordinators).                                           |
+| `report_strict`        | Send a structured reply to the sender only (used by coordinators). Good for public facing agents.     |
 | `snooze` / `unsnooze`  | Schedule or cancel a recurring/one-off replay of the current message — see **Recurring tasks** below. |
 | `anthropic_web_search` | Anthropic's server-side web search tool. Only works with Anthropic LLMs.                              |
 | `tavily_mcp`           | Tavily web search via MCP.                                                                            |
@@ -239,6 +240,8 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `file_text`            | Convert any file to plain text via Apache Tika.                                                       |
 | `bash`                 | Execute arbitrary bash locally — full network access.                                                 |
 | `vimeo`                | Simplified read-only access to Vimeo library.                                                         |
+| `nuki`                 | Manage Nuki device accounts and keypad codes.                                                         |
+| `supabase`             | Supabase/PostgREST CRUD.                                                                              |
 
 ### Writing your own tool
 

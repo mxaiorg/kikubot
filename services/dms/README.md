@@ -66,13 +66,15 @@ To generate a self signed certificate,
 cd services/dms
 mkdir -p ./certs
 # Replace the CN and subjectAltName with your own
+# In the example below, 'mail.agents.example.com' is the hostname 
+# and 'agents.example.com' is the domain name.
 openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
   -keyout ./certs/privkey.pem \
   -out   ./certs/fullchain.pem \
   -subj  "/CN=mail.agents.example.com" \
   -addext "subjectAltName=DNS:mail.agents.example.com,DNS:agents.example.com"
 ```
-⚠️ Set the environment variable `EMAIL_INSECURE_TLS=true` in `configs/env/common.env`
+⚠️ Set the environment variable `email_insecure_tls: true` in `common` section of  `configs/agents.yaml`
 
 ## Log analysis
 

@@ -12,6 +12,7 @@ func wrap(fn func() ToolDefinition) toolFactory {
 
 var registry = map[string]toolFactory{
 	"report":               wrap(ReportTool),
+	"report_strict":        wrap(ReportStrictTool),
 	"snooze":               SnoozeTools,
 	"mxmcp":                MxMCP,
 	"salesforce_mcp":       SalesforceMCP,
@@ -26,6 +27,8 @@ var registry = map[string]toolFactory{
 	"xero_mcp":             XeroMCP,
 	"tavily_mcp":           TavilyMCP,
 	"vimeo":                Vimeo,
+	"nuki":                 Nuki,
+	"supabase":             Supabase,
 }
 
 // LookupTools returns the scripts for a given services key.
@@ -35,6 +38,23 @@ func LookupTools(key string) ([]ToolDefinition, bool) {
 		return nil, false
 	}
 	return factory(), true
+}
+
+// Register adds a tool factory to the registry under the given key. Intended
+// for use from build-tagged packages (see internal/tools_priv) that contribute
+// company-specific tools without putting them in the public registry literal.
+// Call from an init() so the tool is available before agent construction.
+// An empty description is allowed; supply one for factories that build their
+// ToolDefinitions dynamically (e.g. MCP bridges) so the configurator dashboard
+// has something to display.
+func Register(key string, factory func() []ToolDefinition, description string) {
+	if key == "" || factory == nil {
+		return
+	}
+	registry[key] = factory
+	if description != "" {
+		registryDescriptions[key] = description
+	}
 }
 
 // registryDescriptions provides human-friendly summaries for tools whose
@@ -50,4 +70,6 @@ var registryDescriptions = map[string]string{
 	"tavily_mcp":     "Tavily web search — runs web searches and returns extracted content for downstream reasoning.",
 	"vimeo":          "List Vimeo video library: descriptions, links, etc.",
 	"xero_mcp":       "Xero accounting — read and update invoices, contacts, transactions, and other Xero records.",
+	"nuki":           "Manage Nuki device accounts and keypad codes (a reduced set of API commands)",
+	"supabase":       "Supabase/PostgREST CRUD — select, insert, update, upsert, or delete rows on any table the API key has access to.",
 }

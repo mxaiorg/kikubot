@@ -261,7 +261,7 @@ button:disabled, button.primary:disabled {
   font-size: 12px;
   line-height: 1.4;
   box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-  white-space: normal;
+  white-space: pre-wrap;
 }
 
 .error-hint {
