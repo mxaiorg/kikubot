@@ -1,7 +1,16 @@
+# Postfix main.cf overrides
+# docker-mailserver applies each `key = value` line via `postconf -e` at startup.
+#
+# This default ships in unrestricted mode: any sender is accepted. The Agent
+# Configurator rewrites this file when the user enables sender restrictions
+# (LimitAccept=true), at which point smtpd_sender_restrictions is replaced
+# with a check_sender_access … , reject chain that consults
+# postfix-sender-access.cf.
+
 mynetworks = 127.0.0.0/8 [::1]/128 172.16.0.0/12 192.168.0.0/16 10.0.0.0/8
 
-# Restrict DELIVERY to the following domains
+# Route mail through the transport map for selective delivery control.
 transport_maps = texthash:/tmp/docker-mailserver/postfix-transport.cf
 
-# Restrict RECEIVING to the following domains
-smtpd_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/postfix-sender-access.cf, reject
+# Accept mail from any sender (no whitelist/blacklist configured).
+smtpd_sender_restrictions = permit

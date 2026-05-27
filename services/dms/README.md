@@ -28,7 +28,14 @@ docker compose up -d
 
 ## Managing Agent Email Accounts
 
-Connect to the container and run the following commands:
+If you're using the **Configurator** (`scripts/configurator`), account
+management is automatic: every time you save the Email Service page or
+add/edit an agent, the Configurator regenerates `config/postfix-accounts.cf`
+from the roster and the per-agent passwords in `configs/secrets.env`. New
+agents get fresh SHA-512 crypt hashes; agents removed from the roster are
+dropped from the file. Restart the dms container to pick up changes.
+
+For manual management, connect to the container and run:
 
 ```bash
 # Connect to the container
