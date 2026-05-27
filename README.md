@@ -242,6 +242,7 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `vimeo`                | Simplified read-only access to Vimeo library.                                                         |
 | `nuki`                 | Manage Nuki device accounts and keypad codes.                                                         |
 | `supabase`             | Supabase/PostgREST CRUD.                                                                              |
+| `weather`              | Weather API                                                                                           |
 
 ### Writing your own tool
 

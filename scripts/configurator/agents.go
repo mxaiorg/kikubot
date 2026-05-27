@@ -238,6 +238,9 @@ func (a *agentForm) save(root string) (newEmail string, err error) {
 	if err := regenerateCompose(root); err != nil {
 		return def.Email, fmt.Errorf("roster saved but docker-compose.yml update failed: %w", err)
 	}
+	if err := regenerateDmsAccounts(root); err != nil {
+		return def.Email, fmt.Errorf("roster saved but DMS accounts file update failed: %w", err)
+	}
 	return def.Email, nil
 }
 

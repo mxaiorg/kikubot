@@ -245,7 +245,12 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
 				return
 			}
-			setFlash(w, "success", "Saved postfix-transport.cf, postfix-sender-access.cf, and docker-compose.yml")
+			if err := regenerateDmsAccounts(s.root); err != nil {
+				setFlash(w, "error", "Postfix saved, but mailbox accounts file update failed: "+err.Error())
+				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
+				return
+			}
+			setFlash(w, "success", "Saved postfix-transport.cf, postfix-sender-access.cf, docker-compose.yml, and postfix-accounts.cf")
 		} else {
 			setFlash(w, "success", "Email service disabled (no files were modified)")
 		}
