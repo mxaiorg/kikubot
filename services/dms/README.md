@@ -4,7 +4,7 @@ A mail server for agent communication. This server is provided as an option for 
 
 As an extra security precaution, it is recommended to use a dedicated email domain for agent communication. The example configuration provided here ensures that no email is received or delivered outside the company and agent email domains.
 
-If you do use this server, be sure to properly configure the email domain for delivery (SPF, DKIM, DMARC suggested).
+If you do use this server, be sure to properly configure the email domain for delivery (SPF, DKIM, DMARC suggested). See [README-SPF_DKIM_etc.md](README-SPF_DKIM_etc.md)
 
 See the config directory for additional domain configuration.
 
