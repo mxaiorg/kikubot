@@ -25,24 +25,70 @@ func dmsConfigDir(root string) string {
 	return filepath.Join(root, "services", "dms", "config")
 }
 
-// loadEmailServiceConfig best-effort reads the current postfix-transport.cf
-// and postfix-sender-access.cf to populate a config. If neither exists,
-// returns a zero-value struct (Enabled=false).
+// loadEmailServiceConfig best-effort reads the current postfix-transport.cf,
+// postfix-sender-access.cf, and postfix-main.cf to populate a config. If none
+// exist, returns a zero-value struct (Enabled=false).
+//
+// postfix-main.cf is the authoritative source for LimitAccept because that's
+// the file that actually controls whether Postfix rejects unmatched senders
+// (via smtpd_sender_restrictions). The sender-access list is consulted only
+// for the AcceptDomains values themselves. For legacy installs that predate
+// the main.cf override, we fall back to detecting a `.  OK` sentinel in
+// sender-access.
 func loadEmailServiceConfig(root string) *emailServiceConfig {
 	c := &emailServiceConfig{}
 	dir := dmsConfigDir(root)
 	tPath := filepath.Join(dir, "postfix-transport.cf")
 	sPath := filepath.Join(dir, "postfix-sender-access.cf")
+	mPath := filepath.Join(dir, "postfix-main.cf")
 
 	if data, err := os.ReadFile(tPath); err == nil {
 		c.Enabled = true
 		c.parseTransport(string(data))
 	}
+	// Read main.cf first so parseSenderAccess can know whether LimitAccept is
+	// authoritatively set. If main.cf is absent (legacy install), fall back
+	// to the `.  OK` sentinel heuristic in parseSenderAccess.
+	mainDecided := false
+	if data, err := os.ReadFile(mPath); err == nil {
+		c.Enabled = true
+		mainDecided = c.parseMain(string(data))
+	}
 	if data, err := os.ReadFile(sPath); err == nil {
 		c.Enabled = true
-		c.parseSenderAccess(string(data))
+		c.parseSenderAccess(string(data), mainDecided)
 	}
 	return c
+}
+
+// parseMain extracts LimitAccept from a postfix-main.cf override. Returns
+// true if the file contained an `smtpd_sender_restrictions` directive
+// (authoritative); false means caller should fall back to other heuristics.
+func (c *emailServiceConfig) parseMain(s string) bool {
+	decided := false
+	for _, raw := range strings.Split(s, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// `key = value` — split on the first `=`.
+		eq := strings.Index(line, "=")
+		if eq < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eq])
+		val := strings.TrimSpace(line[eq+1:])
+		if key != "smtpd_sender_restrictions" {
+			continue
+		}
+		decided = true
+		// If the directive references check_sender_access AND ends with a
+		// reject action, unmatched senders are blocked — that's the
+		// restricted mode.
+		c.LimitAccept = strings.Contains(val, "check_sender_access") &&
+			strings.Contains(val, "reject")
+	}
+	return decided
 }
 
 func (c *emailServiceConfig) parseTransport(s string) {
@@ -78,8 +124,18 @@ func (c *emailServiceConfig) parseTransport(s string) {
 	}
 }
 
-func (c *emailServiceConfig) parseSenderAccess(s string) {
-	c.LimitAccept = false
+// parseSenderAccess populates AcceptDomains and AgentDomain from the
+// sender-access file. If mainDecided is true, LimitAccept has already been
+// set authoritatively from postfix-main.cf and won't be touched here.
+// Otherwise we fall back to the legacy `.  OK` sentinel: presence means the
+// file was generated in unrestricted mode.
+//
+// Note: `.  OK` is NOT a functional Postfix wildcard — Postfix access maps
+// don't treat `.` as a catch-all. It existed only as a marker that the prior
+// configurator used to decide it shouldn't have emitted a domain list. The
+// actual permit/reject behaviour is controlled by smtpd_sender_restrictions
+// in postfix-main.cf.
+func (c *emailServiceConfig) parseSenderAccess(s string, mainDecided bool) {
 	c.AcceptDomains = nil
 	hasDot := false
 	for _, raw := range strings.Split(s, "\n") {
@@ -109,7 +165,9 @@ func (c *emailServiceConfig) parseSenderAccess(s string) {
 		}
 		c.AcceptDomains = append(c.AcceptDomains, key)
 	}
-	c.LimitAccept = !hasDot
+	if !mainDecided {
+		c.LimitAccept = !hasDot
+	}
 	if !c.LimitAccept {
 		c.AcceptDomains = nil
 	}
@@ -133,6 +191,10 @@ func (c *emailServiceConfig) Save(root string) error {
 	}
 	sender := c.renderSenderAccess()
 	if err := os.WriteFile(filepath.Join(dir, "postfix-sender-access.cf"), []byte(sender), 0o644); err != nil {
+		return err
+	}
+	main := c.renderMainCf()
+	if err := os.WriteFile(filepath.Join(dir, "postfix-main.cf"), []byte(main), 0o644); err != nil {
 		return err
 	}
 	return nil
@@ -183,8 +245,50 @@ func (c *emailServiceConfig) renderSenderAccess() string {
 			fmt.Fprintf(&b, "%s          OK\n", d)
 		}
 	} else {
-		b.WriteString("\n# Allow all external sender domains\n")
-		b.WriteString(".          OK\n")
+		// In unrestricted mode the sender-access list is unused: postfix-main.cf
+		// omits `check_sender_access` entirely. We still keep the agent domain
+		// entry above so the file remains a valid texthash if anything else
+		// references it, and so legacy loaders that pre-date postfix-main.cf
+		// can still recover the agent domain.
+		b.WriteString("\n# Unrestricted mode: smtpd_sender_restrictions is disabled in\n")
+		b.WriteString("# postfix-main.cf, so this list is not consulted for accept/reject.\n")
+	}
+	return b.String()
+}
+
+// renderMainCf builds the postfix-main.cf override that docker-mailserver
+// applies on top of its baseline postfix configuration. Two directives matter:
+//
+//   - transport_maps: always points at our postfix-transport.cf. The actual
+//     restrict-delivery vs. allow-all-outbound decision is baked into that
+//     file (LimitDelivery toggles the catch-all entry).
+//   - smtpd_sender_restrictions: this is the lever for LimitAccept. When the
+//     user has chosen to accept mail from anyone (LimitAccept=false), we set
+//     it to `permit` so unmatched senders are not rejected. When the user has
+//     listed allowed sender domains (LimitAccept=true), we restore the
+//     `check_sender_access … , reject` chain so anything outside the list is
+//     refused at SMTP time.
+//
+// Writing `permit` explicitly (rather than omitting the directive) ensures
+// that toggling from restricted → unrestricted actually clears the prior
+// rule on the next DMS restart; docker-mailserver regenerates main.cf from
+// defaults plus this override at startup, so any directive present here
+// wins.
+func (c *emailServiceConfig) renderMainCf() string {
+	var b strings.Builder
+	b.WriteString("# Postfix main.cf overrides\n")
+	b.WriteString("# Generated by Agent Configurator. Edit via the dashboard or by hand.\n")
+	b.WriteString("# docker-mailserver applies each `key = value` line via `postconf -e` at startup.\n\n")
+
+	b.WriteString("# Route mail through the transport map for selective delivery control.\n")
+	b.WriteString("transport_maps = texthash:/tmp/docker-mailserver/postfix-transport.cf\n\n")
+
+	if c.LimitAccept {
+		b.WriteString("# Restrict RECEIVING to senders listed in postfix-sender-access.cf.\n")
+		b.WriteString("smtpd_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/postfix-sender-access.cf, reject\n")
+	} else {
+		b.WriteString("# Accept mail from any sender (no whitelist/blacklist configured).\n")
+		b.WriteString("smtpd_sender_restrictions = permit\n")
 	}
 	return b.String()
 }
