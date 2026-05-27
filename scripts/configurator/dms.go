@@ -33,6 +33,54 @@ func dmsCertsDir(root string) string {
 	return filepath.Join(root, "services", "dms", "certs")
 }
 
+// seedCommonMailServersFromDMS fills empty common.email_server /
+// common.smtp_server in agents.yaml from the bundled DMS hostname. Called
+// after the Email Service page is saved with Enabled=true so a first-run
+// operator who only configured the hostname there doesn't also have to copy
+// it into the Agent Defaults page — without this step the runtime fails with
+// "missing port in address" when the IMAP client tries to dial.
+//
+// Pre-existing non-empty values are left alone; the operator's choice wins.
+func seedCommonMailServersFromDMS(root, hostname string) error {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return nil
+	}
+	r, err := loadRoster(root)
+	if err != nil {
+		return err
+	}
+	changed := false
+	if strings.TrimSpace(r.Common.EmailServer) == "" {
+		r.Common.EmailServer = hostname + ":993"
+		changed = true
+	}
+	if strings.TrimSpace(r.Common.SmtpServer) == "" {
+		r.Common.SmtpServer = hostname + ":587"
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return saveRoster(root, r)
+}
+
+// setCommonInsecureTLS flips common.email_insecure_tls in agents.yaml. Called
+// after self-signed cert generation so the runtime doesn't reject the cert
+// with "x509: certificate signed by unknown authority". No-op if the flag is
+// already in the desired state.
+func setCommonInsecureTLS(root string, v bool) error {
+	r, err := loadRoster(root)
+	if err != nil {
+		return err
+	}
+	if r.Common.EmailInsecureTLS == v {
+		return nil
+	}
+	r.Common.EmailInsecureTLS = v
+	return saveRoster(root, r)
+}
+
 // dmsHostname extracts the `hostname:` value from the live docker-compose.yml.
 // Falls back to the example file. Returns "" if neither exists or no value
 // is set.

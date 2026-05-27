@@ -326,10 +326,10 @@ func saveCommonDefaults(root string, d *commonDefaults) error {
 		return err
 	}
 	if v := strings.TrimSpace(d.EmailServer); v != "" {
-		r.Common.EmailServer = v
+		r.Common.EmailServer = ensurePort(v, "993")
 	}
 	if v := strings.TrimSpace(d.SMTPServer); v != "" {
-		r.Common.SmtpServer = v
+		r.Common.SmtpServer = ensurePort(v, "587")
 	}
 	r.Common.EmailInsecureTLS = d.EmailInsecureTLS
 	if v := strings.TrimSpace(d.MaxHistoryChars); v != "" {

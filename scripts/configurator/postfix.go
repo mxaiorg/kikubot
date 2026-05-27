@@ -210,6 +210,24 @@ func joinCSV(ss []string) string {
 	return strings.Join(ss, ", ")
 }
 
+// ensurePort returns addr unchanged if it already contains a port (any colon
+// counts — the realistic inputs are `host` and `host:port`); otherwise
+// appends ":<defaultPort>".
+//
+// Defends against operators saving EMAIL_SERVER/SMTP_SERVER as a bare
+// hostname — the IMAP dialer requires host:port and emits "missing port in
+// address" otherwise.
+func ensurePort(addr, defaultPort string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return addr
+	}
+	if strings.Contains(addr, ":") {
+		return addr
+	}
+	return addr + ":" + defaultPort
+}
+
 // hostnameDomain returns the parent domain of a hostname (everything past
 // the first dot), or "" for bare hostnames.
 func hostnameDomain(hostname string) string {

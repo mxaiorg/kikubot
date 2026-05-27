@@ -250,6 +250,11 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
 				return
 			}
+			if err := seedCommonMailServersFromDMS(s.root, c.Hostname); err != nil {
+				setFlash(w, "error", "Postfix saved, but updating common defaults failed: "+err.Error())
+				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
+				return
+			}
 			setFlash(w, "success", "Saved postfix-transport.cf, postfix-sender-access.cf, docker-compose.yml, and postfix-accounts.cf")
 		} else {
 			setFlash(w, "success", "Email service disabled (no files were modified)")
@@ -298,9 +303,12 @@ func (s *server) handleEmailServiceCert(w http.ResponseWriter, r *http.Request) 
 	if err := generateSelfSignedCert(s.root, hostname, domain); err != nil {
 		flashKind = "error"
 		flashMsg = "Certificate generation failed: " + err.Error()
+	} else if err := setCommonInsecureTLS(s.root, true); err != nil {
+		flashKind = "error"
+		flashMsg = "Certificate generated, but enabling email_insecure_tls in agents.yaml failed: " + err.Error()
 	} else {
 		flashKind = "success"
-		flashMsg = "Generated self-signed certificate in services/dms/certs/. Remember to set email_insecure_tls: true under common: in configs/agents.yaml."
+		flashMsg = "Generated self-signed certificate in services/dms/certs/ and set common.email_insecure_tls=true in agents.yaml."
 	}
 
 	view := emailServiceView{
