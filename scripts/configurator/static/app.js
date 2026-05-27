@@ -16,17 +16,27 @@
     // (e.g. "Generate self-signed certificate") that post to a different
     // endpoint and shouldn't be gated by the main form's dirty state.
     const submit = form.querySelector('button[type="submit"]:not([formaction]), button.primary:not([formaction])');
-    if (submit) submit.disabled = true;
     const markDirty = () => {
       if (dirtyForms.has(form)) return;
       dirtyForms.add(form);
       if (submit) submit.disabled = false;
     };
+    // Server can signal that the rendered form values differ from what's on
+    // disk (e.g. after a side-action that re-renders with unsaved edits).
+    if (form.hasAttribute("data-initial-dirty")) {
+      markDirty();
+    } else if (submit) {
+      submit.disabled = true;
+    }
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
-    form.addEventListener("submit", () => {
+    form.addEventListener("submit", (e) => {
       // Submitting is itself a navigation; clear the flag so beforeunload
-      // doesn't fire after the user clicks Save.
+      // doesn't fire after the user clicks Save. Side-action submits (a
+      // submitter with [formaction]) don't save the main form, so keep the
+      // dirty flag — the server will echo the unsaved values back and mark
+      // the form data-initial-dirty.
+      if (e.submitter?.hasAttribute("formaction")) return;
       dirtyForms.delete(form);
     });
   });

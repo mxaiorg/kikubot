@@ -209,9 +209,14 @@ func (s *server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 // emailServiceView is the render-time view that combines the postfix config
 // with adjacent state (hostname from docker-compose, SSL cert presence).
+//
+// Dirty is set when the rendered form values differ from what's on disk —
+// used after the cert-generation side-action re-renders with unsaved edits
+// so the template can mark the form pre-dirty (Save button enabled).
 type emailServiceView struct {
 	*emailServiceConfig
-	SSL sslCertStatus
+	SSL   sslCertStatus
+	Dirty bool
 }
 
 func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
@@ -296,8 +301,38 @@ func (s *server) handleEmailServiceCert(w http.ResponseWriter, r *http.Request) 
 	view := emailServiceView{
 		emailServiceConfig: c,
 		SSL:                loadSSLCertStatus(s.root),
+		Dirty:              !emailServiceConfigEqual(c, loadEmailServiceConfig(s.root)),
 	}
 	s.render(w, r, "email_service", pageData{Active: "email", Data: view, Flash: flashMsg, FlashKind: flashKind})
+}
+
+// emailServiceConfigEqual reports whether two configs are field-for-field
+// equal, treating nil and empty slices as equivalent.
+func emailServiceConfigEqual(a, b *emailServiceConfig) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Enabled != b.Enabled ||
+		a.Hostname != b.Hostname ||
+		a.AgentDomain != b.AgentDomain ||
+		a.LimitDelivery != b.LimitDelivery ||
+		a.LimitAccept != b.LimitAccept {
+		return false
+	}
+	return stringSliceEqual(a.DeliveryDomains, b.DeliveryDomains) &&
+		stringSliceEqual(a.AcceptDomains, b.AcceptDomains)
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // templateFuncs is exposed for parsing.

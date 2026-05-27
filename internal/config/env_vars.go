@@ -64,6 +64,8 @@ var (
 	// Supabase project URL (e.g. https://xyzcompany.supabase.co) and API key.
 	SupabaseUrl    string
 	SupabaseApiKey string
+	// WeatherAPI.com API key (https://www.weatherapi.com).
+	WeatherApiKey string
 )
 
 // Apply merges the yaml-loaded common+agent overrides into the package-level
@@ -201,6 +203,7 @@ func Apply(cfg *AgentsConfig) {
 	NukiApiToken = os.Getenv("NUKI_API_TOKEN")
 	SupabaseUrl = os.Getenv("SUPABASE_URL")
 	SupabaseApiKey = os.Getenv("SUPABASE_API_KEY")
+	WeatherApiKey = os.Getenv("WEATHERAPI_KEY")
 
 	if cfg != nil {
 		AgentEmails = make(map[string]bool, len(cfg.Agents))

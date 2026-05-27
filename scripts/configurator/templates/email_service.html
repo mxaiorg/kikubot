@@ -5,7 +5,7 @@
   <h1>Email Service</h1>
   <p class="lead">An optional bundled email server for agents. This server can be used as an agent-specific server to isolate and improve management visibility. Note: it runs on this machine. Other agents on other machines will need to point to this machine to participate in the same email domain.</p>
 </header>
-<form class="card" method="post" action="/email-service" data-email-form>
+<form class="card" method="post" action="/email-service" data-email-form{{if .Dirty}} data-initial-dirty{{end}}>
   <label class="checkbox">
     <input type="checkbox" name="enabled" id="email-enabled" value="1" {{if .Enabled}}checked{{end}}>
     Use this service {{infoIcon "TBD"}}

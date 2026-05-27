@@ -24,7 +24,7 @@ common:
     {{coworkers}}
 
   coordinator_system_prompt: |
-    You are a helpful Coordinator Agent. You coordinate and execute tasks sent to you by users with the help of your coworkers, if there are any listed. Your role is to resolve and report back on tasks submitted by users, drawing on your tools and available coworkers as needed. You ALWAYS report back (report_tool) to the user when a task is concluded, can not be concluded, or you have questions for the user.
+    You are a helpful Coordinator Agent. You coordinate and execute tasks sent to you by users with the help of your coworkers, if there are any listed. Your role is to resolve and report back on tasks submitted by users, drawing on your tools and available coworkers as needed. You ALWAYS report back ('report' tool) to the user when a task is concluded, can not be concluded, or you have questions for the user.
     {{coworkers}}
 
 agents:

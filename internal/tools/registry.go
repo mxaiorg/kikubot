@@ -29,6 +29,7 @@ var registry = map[string]toolFactory{
 	"vimeo":                Vimeo,
 	"nuki":                 Nuki,
 	"supabase":             Supabase,
+	"weather":              Weather,
 }
 
 // LookupTools returns the scripts for a given services key.
