@@ -48,11 +48,17 @@ const (
 // DefaultXeroScopes is the scope set requested by the bootstrap flow when
 // XERO_SCOPES is unset. offline_access is mandatory for receiving a refresh
 // token. Read-only by default — extend as needed for writes.
+//
+// Note: Xero does NOT have an umbrella "accounting.transactions" scope.
+// Transaction-shaped data is split across accounting.invoices,
+// accounting.banktransactions, accounting.payments, and
+// accounting.manualjournals (each with a matching .read variant).
 var DefaultXeroScopes = []string{
 	"offline_access",
-	"accounting.transactions.read",
 	"accounting.contacts.read",
 	"accounting.settings.read",
+	"accounting.invoices.read",
+	"accounting.banktransactions.read",
 }
 
 type XeroTokens struct {

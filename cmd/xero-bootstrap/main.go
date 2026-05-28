@@ -14,9 +14,11 @@
 // http://localhost:8080/callback.
 //
 // Scopes are taken from XERO_SCOPES (space-separated) or fall back to
-// services.DefaultXeroScopes — accounting read-only by default. Add
-// accounting.transactions or accounting.contacts (without .read) if you need
-// to write.
+// services.DefaultXeroScopes — accounting read-only by default. To write,
+// drop the .read suffix on the specific scope you need (e.g.
+// accounting.invoices, accounting.banktransactions, accounting.contacts).
+// Xero has no umbrella "accounting.transactions" scope — pick the specific
+// resource(s) you want.
 package main
 
 import (
@@ -65,6 +67,13 @@ func main() {
 	if scopesEnv != "" {
 		scopes = strings.Fields(scopesEnv)
 	}
+	if bad := unknownXeroScopes(scopes); len(bad) > 0 {
+		log.Fatalf("unknown Xero scope(s): %v\n"+
+			"Xero's full scope list is at https://developer.xero.com/documentation/guides/oauth2/scopes/\n"+
+			"Common gotcha: there is no 'accounting.transactions' scope — use accounting.invoices, "+
+			"accounting.banktransactions, accounting.payments, or accounting.manualjournals instead.",
+			bad)
+	}
 
 	state, err := randomState()
 	if err != nil {
@@ -72,6 +81,11 @@ func main() {
 	}
 
 	authURL := buildAuthURL(clientID, redirectURI, scopes, state)
+	fmt.Println()
+	fmt.Println("Requesting scopes:")
+	for _, s := range scopes {
+		fmt.Println("  - " + s)
+	}
 	fmt.Println()
 	fmt.Println("Open this URL in a browser, log in to Xero, and consent to the listed scopes:")
 	fmt.Println()
@@ -239,6 +253,73 @@ func buildAuthURL(clientID, redirectURI string, scopes []string, state string) s
 	q.Set("scope", strings.Join(scopes, " "))
 	q.Set("state", state)
 	return "https://login.xero.com/identity/connect/authorize?" + q.Encode()
+}
+
+// knownXeroScopes is the set of scopes Xero exposes in the developer portal's
+// authorisation list (see https://developer.xero.com/documentation/guides/oauth2/scopes/).
+// offline_access and openid/profile/email are standard OAuth scopes that don't
+// appear in that list but are accepted by Web App clients.
+var knownXeroScopes = map[string]bool{
+	"offline_access": true,
+	"openid":         true,
+	"profile":        true,
+	"email":          true,
+
+	"app.connections": true,
+
+	"accounting.settings":              true,
+	"accounting.settings.read":         true,
+	"accounting.contacts":              true,
+	"accounting.contacts.read":         true,
+	"accounting.attachments":           true,
+	"accounting.attachments.read":      true,
+	"accounting.budgets.read":          true,
+	"accounting.payments":              true,
+	"accounting.payments.read":         true,
+	"accounting.invoices":              true,
+	"accounting.invoices.read":         true,
+	"accounting.banktransactions":      true,
+	"accounting.banktransactions.read": true,
+	"accounting.manualjournals":        true,
+	"accounting.manualjournals.read":   true,
+
+	"accounting.reports.aged.read":             true,
+	"accounting.reports.balancesheet.read":     true,
+	"accounting.reports.banksummary.read":      true,
+	"accounting.reports.budgetsummary.read":    true,
+	"accounting.reports.executivesummary.read": true,
+	"accounting.reports.profitandloss.read":    true,
+	"accounting.reports.trialbalance.read":     true,
+	"accounting.reports.taxreports.read":       true,
+	"accounting.reports.tenninetynine.read":    true,
+
+	"payroll.employees":       true,
+	"payroll.employees.read":  true,
+	"payroll.payruns":         true,
+	"payroll.payruns.read":    true,
+	"payroll.payslip":         true,
+	"payroll.payslip.read":    true,
+	"payroll.settings":        true,
+	"payroll.settings.read":   true,
+	"payroll.timesheets":      true,
+	"payroll.timesheets.read": true,
+
+	"files":         true,
+	"files.read":    true,
+	"assets":        true,
+	"assets.read":   true,
+	"projects":      true,
+	"projects.read": true,
+}
+
+func unknownXeroScopes(scopes []string) []string {
+	var bad []string
+	for _, s := range scopes {
+		if !knownXeroScopes[s] {
+			bad = append(bad, s)
+		}
+	}
+	return bad
 }
 
 func randomState() (string, error) {
