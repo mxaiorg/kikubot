@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // Reference output cross-checked against `openssl passwd -6 -salt saltstring`,
 // which matches the GNU libc / Dovecot SHA-512 crypt implementation.
@@ -40,5 +44,58 @@ func TestSha512Crypt_VerifyExternalHash(t *testing.T) {
 	// Scheme-prefixed form should also be accepted (this is how we store it).
 	if !verifySha512Crypt("correcthorsebatterystaple", cryptScheme+stored) {
 		t.Errorf("verify failed against scheme-prefixed hash")
+	}
+}
+
+// Accounts added manually inside the dms container (e.g. via `setup email
+// add`) must survive a configurator save. Only roster-managed entries get
+// rewritten; everything else in postfix-accounts.cf is preserved verbatim.
+func TestRegenerateDmsAccounts_PreservesManualEntries(t *testing.T) {
+	root := t.TempDir()
+
+	// Mark the bundled email service as enabled by dropping a transport file.
+	dmsDir := filepath.Join(root, "services", "dms", "config")
+	if err := os.MkdirAll(dmsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dmsDir, "postfix-transport.cf"), []byte("# stub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Roster with one agent.
+	if err := os.MkdirAll(filepath.Join(root, "configs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rosterYAML := "common: {}\nagents:\n  - name: Kiku\n    email: kiku@agents.example.com\n"
+	if err := os.WriteFile(filepath.Join(root, "configs", "agents.yaml"), []byte(rosterYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setAgentPassword(root, "kiku@agents.example.com", "rosterpass"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-existing postfix-accounts.cf: one roster mailbox, one manual mailbox.
+	manualHash := sha512Crypt("manualpass", "manualsalt000000")
+	rosterHash := sha512Crypt("rosterpass", "rostersalt000000")
+	pre := "kiku@agents.example.com|" + rosterHash + "\n" +
+		"shared@agents.example.com|" + manualHash + "\n"
+	if err := os.WriteFile(dmsAccountsPath(root), []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := regenerateDmsAccounts(root); err != nil {
+		t.Fatalf("regenerateDmsAccounts: %v", err)
+	}
+
+	got := parseDmsAccounts(dmsAccountsPath(root))
+	if h, ok := got["kiku@agents.example.com"]; !ok {
+		t.Errorf("roster account missing after regenerate")
+	} else if h != rosterHash {
+		t.Errorf("roster account hash was rotated unnecessarily")
+	}
+	if h, ok := got["shared@agents.example.com"]; !ok {
+		t.Errorf("manually-added account was erased by regenerate")
+	} else if h != manualHash {
+		t.Errorf("manual account hash changed: got %q want %q", h, manualHash)
 	}
 }

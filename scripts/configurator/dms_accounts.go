@@ -40,8 +40,10 @@ func dmsAccountsPath(root string) string {
 // regenerateDmsAccounts rewrites postfix-accounts.cf from the roster and
 // configs/secrets.env. For each agent it keeps the existing hash when the
 // stored hash still verifies against the current password (avoids salt churn
-// across saves), and generates a fresh SHA-512 crypt hash otherwise. Lines
-// for emails not in the roster are dropped.
+// across saves), and generates a fresh SHA-512 crypt hash otherwise. Entries
+// already present in postfix-accounts.cf for non-roster emails are preserved
+// verbatim — they represent mailboxes provisioned manually (e.g. via
+// `setup email add`) that the operator owns outside the roster.
 //
 // Skipped when the bundled email service isn't in use (services/dms/config/
 // missing, or the postfix transport/sender-access files aren't present).
@@ -80,6 +82,15 @@ func regenerateDmsAccounts(root string) error {
 			return fmt.Errorf("generating salt: %w", err)
 		}
 		accts = append(accts, acct{email, sha512Crypt(pw, salt)})
+	}
+	known := make(map[string]bool, len(accts))
+	for _, a := range accts {
+		known[strings.ToLower(a.email)] = true
+	}
+	for email, h := range existing {
+		if !known[email] {
+			accts = append(accts, acct{email, h})
+		}
 	}
 	sort.Slice(accts, func(i, j int) bool {
 		return strings.ToLower(accts[i].email) < strings.ToLower(accts[j].email)

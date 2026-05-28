@@ -25,11 +25,13 @@ import (
 //   - nuki_delete_account_user
 //
 // SmartLock keypad code management:
+//   - nuki_list_smartlocks        (discover the Web API smartlockId for a given lock)
 //   - nuki_list_keypad_codes      (needed to discover the auth id before delete)
 //   - nuki_set_keypad_code        (create a new keypad authorization)
 //   - nuki_delete_keypad_code     (remove an existing keypad authorization)
-// Note: A smart lock ID is needed to identify the lock to operate on.
-//       A list of IDs might be passed in via agent Knowledge.
+// Note: The Web API `smartlockId` is NOT the same as the hex device ID printed on
+//       the lock or shown in the Nuki mobile app. Use nuki_list_smartlocks (or
+//       agent Knowledge) to discover the correct integer id.
 //
 // Auth: NUKI_API_TOKEN sent as `Authorization: Bearer …`.
 
@@ -52,9 +54,35 @@ func Nuki() []ToolDefinition {
 		nukiGetAccountUserTool(),
 		nukiUpdateAccountUserTool(),
 		nukiDeleteAccountUserTool(),
+		nukiListSmartlocksTool(),
 		nukiListKeypadCodesTool(),
 		nukiSetKeypadCodeTool(),
 		nukiDeleteKeypadCodeTool(),
+	}
+}
+
+// ── SmartLock discovery ─────────────────────────────────────────────────
+
+func nukiListSmartlocksTool() ToolDefinition {
+	return ToolDefinition{
+		Name: "nuki_list_smartlocks",
+		Description: "List all smartlocks visible on this Nuki account. Use this to discover the " +
+			"Web API `smartlockId` (a large integer) needed by the keypad-code tools. " +
+			"The hex device ID printed on the lock or shown in the Nuki mobile app is NOT the " +
+			"same value — match the user's lock by `name` (or `nukiId` if they provided the " +
+			"hex/serial) and use the returned `smartlockId` field.",
+		InputSchema: []byte(`{
+			"type": "object",
+			"properties": {}
+		}`),
+		Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
+			body, err := nukiRequest(ctx, http.MethodGet, "/smartlock", nil)
+			if err != nil {
+				return "", err
+			}
+			return string(body), nil
+		},
+		StaticSystem: "- The Nuki Web API `smartlock_id` (used by nuki_set_keypad_code, nuki_list_keypad_codes, nuki_delete_keypad_code) is NOT the hex device ID printed on the lock or shown in the Nuki mobile app. It is a separate large integer issued by Nuki's backend. If the user gives you a hex ID (e.g. `2E29080D`), a serial, or a friendly name, call nuki_list_smartlocks first and match by `name` or `nukiId` to find the correct numeric `smartlockId`. NEVER convert a hex device ID to decimal and pass it as smartlock_id — that will fail.\n",
 	}
 }
 

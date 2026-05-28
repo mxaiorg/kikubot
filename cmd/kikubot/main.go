@@ -206,6 +206,15 @@ func process(parent context.Context) {
 				// handleAutoReply instead of hanging) and mark seen.
 				if errors.Is(err, agents.ErrMaxTurns) {
 					delete(emailRetryCounts, email.MessageId)
+					// If the agent already called set_task_status=complete, the
+					// user has the real answer (typically from report_tool a
+					// turn or two earlier). Suppress the failure notice — it
+					// only confuses recipients who just got a successful reply.
+					if mem, memErr := services.GetMemory(email.GetThreadRoot()); memErr == nil && mem != nil && mem.Status == services.MemoryStatus_Complete {
+						log.Printf("max turns exhausted for email %s but task already marked complete — suppressing notice", email.MessageId)
+						processed = append(processed, email.MessageId)
+						continue
+					}
 					log.Printf("max turns exhausted for email %s — notifying sender and marking seen", email.MessageId)
 					notice := fmt.Sprintf(
 						"⚠️ Agent %s exhausted its turn budget (%d turns) while processing this task and could not complete it. Partial progress has been preserved in the thread history, but no final answer was produced.\n",
