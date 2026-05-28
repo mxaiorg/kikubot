@@ -25,6 +25,7 @@ var registry = map[string]toolFactory{
 	"file_text":            wrap(FileTextTool),
 	"bash":                 wrap(BashTool),
 	"xero_mcp":             XeroMCP,
+	"xero_api":             XeroAPI,
 	"tavily_mcp":           TavilyMCP,
 	"vimeo":                Vimeo,
 	"nuki":                 Nuki,
@@ -70,7 +71,8 @@ var registryDescriptions = map[string]string{
 	"buffer_mcp":     "Buffer social media — draft, schedule, and publish posts across connected social channels.",
 	"tavily_mcp":     "Tavily web search — runs web searches and returns extracted content for downstream reasoning.",
 	"vimeo":          "List Vimeo video library: descriptions, links, etc.",
-	"xero_mcp":       "Xero accounting — read and update invoices, contacts, transactions, and other Xero records.",
+	"xero_mcp":       "Xero accounting via the upstream xero-mcp-server (Custom Connection apps; AU/NZ/UK/US only).",
+	"xero_api":       "Xero accounting via direct REST (WebApp OAuth, works anywhere). Currently exposes invoices and contacts. Run cmd/xero-bootstrap once to seed the refresh token.",
 	"nuki":           "Manage Nuki device accounts and keypad codes (a reduced set of API commands)",
 	"supabase":       "Supabase/PostgREST CRUD — select, insert, update, upsert, or delete rows on any table the API key has access to.",
 }

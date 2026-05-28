@@ -80,7 +80,7 @@ _Use your coding agent_
 ## Configuration Tool (assisted manual installation)
 
 > ### Configuration Dashboard Tool
-> A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already. See `scripts/configurator/README.md` [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
+> A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already. See [scripts/configurator/README.md](scripts/configurator/README.md). There is also a [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
 
 ### Manual Configuration
 

@@ -1,5 +1,3 @@
-//go:build private
-
 // Package toolspriv holds company-specific ("private") tool implementations
 // that should not ship in the default build.
 //

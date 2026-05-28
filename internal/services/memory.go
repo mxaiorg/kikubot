@@ -37,6 +37,7 @@ func InitDataPaths(inContainer bool) {
 	if inContainer {
 		snoozeFile = "data/snooze.json"
 		memoryDir = "data/memory"
+		xeroDir = "data/xero"
 	}
 }
 

@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	_ "kikubot/internal/tools_priv"
+
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
