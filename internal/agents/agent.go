@@ -13,6 +13,7 @@ import (
 	"log"
 	netmail "net/mail"
 	"strings"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
@@ -31,6 +32,11 @@ type Agent struct {
 	toolIndex    map[string]tools.ToolDefinition
 	history      []anthropic.MessageParam
 	lastResponse string
+
+	// sysMu guards cfg.System, which can be hot-swapped at runtime (e.g. when
+	// the knowledge base is edited) while HandleMessage reads it to build the
+	// cacheable stable prompt.
+	sysMu sync.RWMutex
 }
 
 func NewAgent(cfg AgentConfig, agentTools []tools.ToolDefinition) *Agent {
@@ -63,6 +69,24 @@ func (a *Agent) ClearHistory() {
 }
 
 func (a *Agent) LastResponse() string { return a.lastResponse }
+
+// SetSystem replaces the base system prompt (everything the tool instructions
+// are appended to). It exists so knowledge-base edits can be hot-reloaded
+// without recreating the agent — and, crucially, without re-spawning its
+// long-lived MCP tool subprocesses. The next HandleMessage picks up the new
+// prompt; in-flight history is untouched.
+func (a *Agent) SetSystem(system string) {
+	a.sysMu.Lock()
+	a.cfg.System = system
+	a.sysMu.Unlock()
+}
+
+// systemPrompt returns the current base system prompt under the read lock.
+func (a *Agent) systemPrompt() string {
+	a.sysMu.RLock()
+	defer a.sysMu.RUnlock()
+	return a.cfg.System
+}
 
 // HandleMessage runs the agent's agentic loop for one inbound message.
 // It returns any outbound messages produced by send_message tool calls.
@@ -103,7 +127,7 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 		stable.WriteString(preSys)
 		stable.WriteString("\n\n")
 	}
-	stable.WriteString(a.cfg.System)
+	stable.WriteString(a.systemPrompt())
 	if len(staticToolInstructions) > 0 {
 		stable.WriteString("\n\n# Tool Instructions\n\n")
 		stable.WriteString(strings.Join(staticToolInstructions, "\n\n"))

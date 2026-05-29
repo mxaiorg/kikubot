@@ -30,3 +30,48 @@ A few minutes later, the tool was created. Thanks, Claude!
 2. Also, remember to pass in your API key as an environment variable.
 
 🤔 You might be wondering why we created a Vimeo tool instead of using an existing Vimeo MCP tool. The reason is that the Vimeo MCP tools implements much more capability than we need. As a result, it consumes a lot more tokens than required for our case.
+
+## Private tools (`internal/tools_priv/`)
+
+Public tools (the ones in *this* directory) are registered in `registry.go` and live in the published repository. **Private tools** are for the things you don't want to publish: company-specific integrations, proprietary logic, or tools whose very existence (and credentials) should stay out of the public codebase. They go in [`internal/tools_priv/`](../tools_priv/) instead, and once present they behave identically to built-in tools — add the key to an agent's `tools:` list in `agents.yaml` and you're done.
+
+### How it works
+
+- **Presence-based, not build-tagged.** `cmd/kikubot` blank-imports `internal/tools_priv` unconditionally. If files are present there, they're compiled and their `init()` functions run; if the directory is empty (a clean public checkout), the package contributes nothing. There's no build flag to remember.
+- **Self-registration.** Instead of editing the `registry.go` map literal (which lives in the public package), a private tool registers itself at startup with `tools.Register(key, factory, description)` from an `init()`. The `description` is what the configurator dashboard shows in its tooltip — supply one, especially for MCP/CLI factories that build their `ToolDefinition`s dynamically.
+- **Secrets stay private too.** Public tools declare their env-var-backed credentials as exported vars in `internal/config/env_vars.go`. Private tools instead read secrets directly with `os.Getenv` inside `internal/tools_priv`. The variables still live in `configs/secrets.env` (gitignored, already loaded into every container), but no symbol referencing them appears in the public repo — so the public codebase stays unaware the tool, or its credentials, exist.
+- **Graceful when unconfigured.** A private tool factory should return `nil` (and log a line) when its required env var is unset, so an agent that lists the key but lacks the secret simply gets no tool rather than a crash.
+
+### Why this matters: update without merge conflicts
+
+Because the published repository tracks this directory as effectively empty, your private `.go` files sit *outside* the upstream-tracked code. You can keep pulling project updates (`git pull`) and never hit a merge conflict over your own tools or the shared `registry.go`. Your private code is additive — it plugs in through `tools.Register` rather than by editing files the upstream project also changes.
+
+### Minimal example
+
+```go
+// internal/tools_priv/acme.go
+package toolspriv
+
+import (
+    "log"
+    "os"
+
+    "kikubot/internal/tools"
+)
+
+func acme() []tools.ToolDefinition {
+    key := os.Getenv("ACME_API_KEY")
+    if key == "" {
+        log.Println("[acme] ACME_API_KEY not set — Acme tools disabled")
+        return nil
+    }
+    // ...build ToolDefinitions using key...
+    return nil
+}
+
+func init() {
+    tools.Register("acme", acme, "Acme Corp integration — ...")
+}
+```
+
+Then add `ACME_API_KEY=...` to `configs/secrets.env` and reference the key (`acme`) from an agent's `tools:` list in `configs/agents.yaml`. The configurator dashboard flags private tools with a small **private** badge so it's clear which tools depend on local-only source. The package doc comment in [`internal/tools_priv/doc.go`](../tools_priv/doc.go) is the canonical reference.

@@ -22,7 +22,7 @@ Kikubot turns an email account into an autonomous agent. Each running container 
 - **Per-thread memory.** Each email thread is a long-running conversation; the agent's history is persisted as JSON keyed by the thread's root Message-Id.
 - **Pluggable tools.** Built-in tools cover messaging, status reporting, snoozing, and mailbox search. Optional tools include Salesforce, WordPress, Buffer, Box, Helpjuice, Tavily web search, Apache Tika file-to-text, and arbitrary local/HTTP MCP servers.
 - **Pluggable LLMs.** Anthropic API (default, with prompt caching) or OpenRouter (with backup-model fallback).
-- **Knowledge base.** Per-agent and shared markdown files appended to the system prompt at startup.
+- **Knowledge base.** Per-agent and shared markdown files appended to the system prompt — editable live and hot-reloaded without a rebuild.
 - **Multi-agent coordination.** Agents talk to each other via the `message_tool` core tool; coordinator agents can delegate, fan out, and snooze pending work.
 - **Recurring tasks.** Agents can schedule tasks to run at specific times or intervals.
 - **Auto-reply / bounce safety.** DSNs and out-of-office replies bypass the LLM to prevent infinite delegation loops.
@@ -65,6 +65,15 @@ Each agent container runs an identical Go binary, parameterised by a shared `con
 - **An IMAP + SMTP server** with one mailbox per agent. You can use any provider; this repo includes a self-hostable docker-mailserver sidecar at `services/dms/` if you want one.
 - **(Optional) tool credentials** for any integrations you enable (Salesforce, WordPress, Buffer, Helpjuice, Box, Xero, Tavily, mxMCP).
 
+## Configuration Tool
+A dashboard configuration tool can be found in the scripts directory. It's a web app that lets you configure your deployment: define your agents and optionally configure the included email server.
+
+```bash
+go run ./scripts/configurator  # serves on 127.0.0.1:50042
+```
+
+See [scripts/configurator/README.md](scripts/configurator/README.md) for more details. There is also a [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
+
 ## AI Configuration
 _Use your coding agent_
 
@@ -76,11 +85,6 @@ _Use your coding agent_
 > Or if you want to configure in your own language:
 > * Read the CONFIGURATION.md file and follow its instructions to help me
     configure kikubot. Communicate with me in Japanese.
-
-## Configuration Tool (assisted manual installation)
-
-> ### Configuration Dashboard Tool
-> A dashboard configuration tool can be found in the scripts directory. The aim is to provide a simple way to configure a Kikubot deployment. This is very much a work in progress and hasn't been tested extensively, but it is probably useful already. See [scripts/configurator/README.md](scripts/configurator/README.md). There is also a [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
 
 ### Manual Configuration
 
@@ -119,6 +123,8 @@ To watch the conversation between agents recorded in the logs:
 ```bash
 docker compose logs -f
 ```
+
+Because Kikubot is an email based system, you can use any email client to follow the internal and external conversation of your agents. See [Observability](README-Observability.md)
 
 ## Configuration
 
@@ -181,7 +187,7 @@ The container resolves its own mailbox password by uppercasing the local-part of
 
 ### Knowledge base — `configs/knowledge/`
 
-Markdown files appended to each agent's system prompt at startup.
+Markdown files appended to each agent's system prompt. They're the simplest way to give an agent durable, always-in-context knowledge — company facts, tone of voice, naming conventions, links — without touching code or the system prompt itself. Each agent loads the shared `common/` directory plus its own `<local-part>/` directory (matching the email local-part, so `kiku@…` reads `configs/knowledge/kiku/`).
 
 ```
 configs/knowledge/
@@ -192,7 +198,15 @@ configs/knowledge/
     └── 01_file_links.md
 ```
 
-Files are sorted by name — use numeric prefixes (`01_`, `02_`) to control ordering. See [`configs/knowledge/readme.md`](configs/knowledge/readme.md).
+Files are sorted by name — use numeric prefixes (`01_`, `02_`) to control ordering. The `common/` files come first, then the agent's own. Because knowledge lives in the cacheable prefix of the system prompt, large knowledge bases don't re-cost tokens on every email (with the Anthropic provider).
+
+**Live editing — no rebuild required.** The knowledge directory is bind-mounted into each container (`./configs/knowledge:/app/knowledge:ro` in `docker-compose.yml`), so edits on the host are immediately visible inside the container. Agents hot-reload them: each poll cycle re-reads the files if any changed, so an edit takes effect within ~30s — no image rebuild, no container restart. For instant propagation, send `SIGHUP`:
+
+```bash
+docker compose kill -s HUP kiku    # reload one agent now
+```
+
+The [`scripts/configurator`](scripts/configurator/README.md) dashboard edits these files for you and fires that signal automatically after a save or delete (falling back to the poll if the signal can't be delivered). See [`configs/knowledge/readme.md`](configs/knowledge/readme.md).
 
 ### Tool credentials
 
@@ -246,6 +260,14 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `nuki`                 | Manage Nuki device accounts and keypad codes.                                                         |
 | `supabase`             | Supabase/PostgREST CRUD.                                                                              |
 | `weather`              | Weather API                                                                                           |
+
+### Private tools
+
+Not every tool belongs in the public repo — company-specific integrations, proprietary logic, or anything you simply don't want to publish. These live in [`internal/tools_priv/`](internal/tools_priv/) and work exactly like built-in tools: drop a `.go` file there, register it from an `init()` with `tools.Register(key, factory, description)`, add the key to an agent's `tools:` list, and it's available. `cmd/kikubot` blank-imports the package unconditionally, so any files present are compiled and registered automatically; when the directory is empty (a clean public checkout), it contributes nothing.
+
+**Why it matters: update without conflicts.** The public distribution ships this directory effectively empty, so your private tool files sit *outside* the upstream-tracked code. You can keep pulling project updates and never hit a merge conflict over your own tools. (Their secrets follow the same idea — private tools read credentials directly via `os.Getenv` rather than declaring them in the public `internal/config/env_vars.go`, so no symbol referencing them appears in the public repo.) The configurator dashboard flags any private tool with a small **private** badge so it's clear which tools depend on local-only source.
+
+See the [tools README](internal/tools/README.md) for the full convention and a worked example.
 
 ### Writing your own tool
 

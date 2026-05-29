@@ -409,7 +409,7 @@ func (s *server) handleKnowledgeSave(w http.ResponseWriter, r *http.Request) {
 		if n, nErr := validKnowledgeName(name); nErr == nil {
 			saved = n
 		}
-		v.Flash, v.FlashKind = "Saved "+v.Dir+"/"+saved, "success"
+		v.Flash, v.FlashKind = "Saved "+v.Dir+"/"+saved+knowledgeReloadNote(s.root, scope), "success"
 	}
 	s.renderKnowledge(w, v)
 }
@@ -428,7 +428,7 @@ func (s *server) handleKnowledgeDelete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		v.Flash, v.FlashKind = "Delete failed: "+err.Error(), "error"
 	} else {
-		v.Flash, v.FlashKind = "Deleted "+name, "success"
+		v.Flash, v.FlashKind = "Deleted "+name+knowledgeReloadNote(s.root, scope), "success"
 	}
 	s.renderKnowledge(w, v)
 }

@@ -56,24 +56,25 @@ func composeServiceName(name, stem string) string {
 	return out
 }
 
-// regenerateCompose writes docker-compose.yml with one service per agent
-// currently in configs/agents.yaml. Each service shares the same
-// configs/secrets.env env_file (so credentials are loaded once) and is
-// distinguished by an AGENT_EMAIL environment variable — that selector lets
-// the container pick the right entry from agents.yaml at startup.
-func regenerateCompose(root string) error {
+// composeService is one generated docker-compose service: its service key
+// (the YAML map key / `docker compose` target), the agent's email stem (used
+// for the data volume and knowledge dir), and the agent email.
+type composeService struct {
+	Key   string
+	Stem  string
+	Email string
+}
+
+// composeServices derives the docker-compose service list from the current
+// roster, applying the same keying (and duplicate-suffixing) as the generated
+// docker-compose.yml. Shared by regenerateCompose and the knowledge-reload
+// signaller so service names stay in lockstep.
+func composeServices(root string) ([]composeService, error) {
 	agents, err := listAgents(root)
 	if err != nil {
-		return fmt.Errorf("listing agents: %w", err)
+		return nil, fmt.Errorf("listing agents: %w", err)
 	}
-
-	type svc struct {
-		Key   string
-		Stem  string
-		Email string
-	}
-	emailHost := emailServerHost(root)
-	svcs := make([]svc, 0, len(agents))
+	svcs := make([]composeService, 0, len(agents))
 	used := map[string]int{}
 	for _, a := range agents {
 		key := composeServiceName(a.Name, a.Stem)
@@ -81,9 +82,23 @@ func regenerateCompose(root string) error {
 			key = fmt.Sprintf("%s-%d", key, n+1)
 		}
 		used[composeServiceName(a.Name, a.Stem)]++
-		svcs = append(svcs, svc{Key: key, Stem: a.Stem, Email: a.Email})
+		svcs = append(svcs, composeService{Key: key, Stem: a.Stem, Email: a.Email})
 	}
 	sort.Slice(svcs, func(i, j int) bool { return svcs[i].Key < svcs[j].Key })
+	return svcs, nil
+}
+
+// regenerateCompose writes docker-compose.yml with one service per agent
+// currently in configs/agents.yaml. Each service shares the same
+// configs/secrets.env env_file (so credentials are loaded once) and is
+// distinguished by an AGENT_EMAIL environment variable — that selector lets
+// the container pick the right entry from agents.yaml at startup.
+func regenerateCompose(root string) error {
+	svcs, err := composeServices(root)
+	if err != nil {
+		return err
+	}
+	emailHost := emailServerHost(root)
 
 	var b strings.Builder
 	b.WriteString("services:\n")
@@ -104,6 +119,10 @@ func regenerateCompose(root string) error {
 		fmt.Fprintf(&b, "#      - \"%s:host-gateway\" # optional for localhost email server\n", emailHost)
 		b.WriteString("    volumes:\n")
 		fmt.Fprintf(&b, "      - ./data/%s:/app/data\n", s.Stem)
+		// Live-mount the knowledge base so configurator edits are visible
+		// without rebuilding the image; the agent hot-reloads on change
+		// (poll + SIGHUP).
+		b.WriteString("      - ./configs/knowledge:/app/knowledge:ro\n")
 	}
 
 	return os.WriteFile(composePath(root), []byte(b.String()), 0o644)

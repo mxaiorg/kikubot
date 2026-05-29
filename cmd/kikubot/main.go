@@ -19,6 +19,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	_ "kikubot/internal/tools_priv"
@@ -29,6 +31,20 @@ import (
 var (
 	agent     *agents.Agent
 	agentsCfg *config.AgentsConfig
+)
+
+// Knowledge hot-reload state. baseSystem is the system prompt without the
+// knowledge block; knowledgeKey is the agent's knowledge dir key; and
+// knowledgeModTime is the newest knowledge-file mtime seen on the last load.
+// reloadKnowledgeIfChanged re-appends the knowledge block when files change,
+// so edits take effect without a rebuild or restart.
+var (
+	baseSystem       string
+	knowledgeKey     string
+	knowledgeModTime time.Time
+	// knowledgeReloadMu serializes reloads so the 30s poll and an on-demand
+	// SIGHUP trigger can't race on knowledgeModTime / the agent prompt.
+	knowledgeReloadMu sync.Mutex
 )
 
 // emailRetryCounts tracks how many times each inbound Message-Id has been
@@ -61,6 +77,17 @@ func main() {
 
 	initAgent()
 
+	// SIGHUP forces an immediate knowledge-base reload — near-instant
+	// propagation of configurator edits without waiting for the next poll.
+	// `docker compose kill -s HUP <service>` (or `kill -HUP <pid>` in dev).
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+			forceReloadKnowledge()
+		}
+	}()
+
 	// Periodic prune of the Outlook Thread-Index fallback map. The index
 	// grows by one entry per Outlook-originated thread; pruning drops
 	// entries whose memory file no longer exists (e.g. operator cleanup).
@@ -83,6 +110,9 @@ func main() {
 }
 
 func process(parent context.Context) {
+	// Pick up any knowledge-base edits since the last poll (no restart needed).
+	reloadKnowledgeIfChanged()
+
 	// Check the email inbox for new messages
 	//log.Println("checking email inbox...")
 	emails, getErr := services.GetNewEmails(parent)
@@ -540,21 +570,24 @@ func initAgent() {
 		}
 	}
 
-	// Load knowledge base files into the system prompt.
-	// Derive the agent key from the email local part (e.g. "kiku@agents.mxhero.com" → "kiku").
-	agentKey := strings.ToLower(config.AgentEmail)
-	if i := strings.Index(agentKey, "@"); i > 0 {
-		agentKey = agentKey[:i]
+	// Derive the agent key from the email local part (e.g.
+	// "kiku@agents.mxhero.com" → "kiku") and stash the knowledge-free base
+	// prompt so the knowledge block can be re-appended on later reloads.
+	knowledgeKey = strings.ToLower(config.AgentEmail)
+	if i := strings.Index(knowledgeKey, "@"); i > 0 {
+		knowledgeKey = knowledgeKey[:i]
 	}
-	if kb := loadKnowledge(agentKey); kb != "" {
-		system += kb
-	}
+	baseSystem = system
 
 	agent = agents.NewAgent(agents.AgentConfig{
 		ID:     fmt.Sprintf("%d", time.Now().Unix()),
 		Role:   "worker",
 		System: system,
 	}, agentTools)
+
+	// Load the knowledge base into the system prompt and record its mtime so
+	// process() can hot-reload on edits without a restart.
+	applyKnowledge()
 
 	log.Printf("Agent %s initialized with %d scripts", config.AgentName, len(agentTools))
 	//log.Printf("Agent initialized with system prompt:\n\n%s\n\n", system)
@@ -638,6 +671,79 @@ func loadKnowledge(agentKey string) string {
 		return ""
 	}
 	return strings.Join(sections, "\n\n---\n\n")
+}
+
+// applyKnowledge rebuilds the agent's system prompt from the cached base prompt
+// plus the current on-disk knowledge files, and records the newest knowledge
+// mtime so subsequent reloads can detect changes.
+func applyKnowledge() {
+	system := baseSystem
+	if kb := loadKnowledge(knowledgeKey); kb != "" {
+		system += kb
+	}
+	agent.SetSystem(system)
+	knowledgeModTime = knowledgeMTime(knowledgeKey)
+}
+
+// knowledgeMTime returns the newest modification time across the agent's
+// knowledge directories (common + <knowledgeKey>), including the directories
+// themselves so that file additions and deletions register too. A zero time
+// means no knowledge directory exists.
+func knowledgeMTime(agentKey string) time.Time {
+	baseDir := knowledgeBaseDir()
+	dirs := []string{"common"}
+	if agentKey != "" {
+		dirs = append(dirs, agentKey)
+	}
+	var newest time.Time
+	for _, dir := range dirs {
+		dirPath := filepath.Join(baseDir, dir)
+		// The directory's own mtime changes when files are added or removed.
+		if info, err := os.Stat(dirPath); err == nil {
+			if info.ModTime().After(newest) {
+				newest = info.ModTime()
+			}
+		}
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			if info, err := e.Info(); err == nil && info.ModTime().After(newest) {
+				newest = info.ModTime()
+			}
+		}
+	}
+	return newest
+}
+
+// reloadKnowledgeIfChanged re-reads the knowledge base and updates the agent's
+// system prompt when any knowledge file has changed since the last load. It is
+// cheap to call every poll: unless a file moved it only stats directories.
+// This lets configurator edits take effect without a rebuild or restart.
+func reloadKnowledgeIfChanged() {
+	knowledgeReloadMu.Lock()
+	defer knowledgeReloadMu.Unlock()
+	mt := knowledgeMTime(knowledgeKey)
+	if !mt.After(knowledgeModTime) {
+		return
+	}
+	applyKnowledge()
+	log.Printf("knowledge base reloaded (newest mtime %s)", mt.Format(time.RFC3339))
+}
+
+// forceReloadKnowledge unconditionally re-reads the knowledge base, regardless
+// of mtime. Wired to SIGHUP so an operator (or the configurator after writing
+// files) can trigger near-instant propagation instead of waiting for the next
+// poll. Safe to call concurrently with the poll-driven reload.
+func forceReloadKnowledge() {
+	knowledgeReloadMu.Lock()
+	defer knowledgeReloadMu.Unlock()
+	applyKnowledge()
+	log.Printf("knowledge base reloaded on SIGHUP")
 }
 
 // agentsConfigPath resolves the path to agents.yaml.
