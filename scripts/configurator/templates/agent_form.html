@@ -74,11 +74,6 @@
   </fieldset>
 
   <fieldset class="subcard">
-    <legend>Knowledge</legend>
-    <p class="hint">Include additional common and agent specific knowledge in the knowledge directory. The knowledge directory holds common and per agent knowledge in Markdown format. Knowledge is loaded into the agent system prompt as context for the agent to use when answering questions. For more information see <code>configs/knowledge/README.md</code>.</p>
-  </fieldset>
-
-  <fieldset class="subcard">
     <legend>Roster Entry</legend>
     <p class="hint">How this agent is presented to its colleagues. Saved to <code>configs/agents.yaml</code>.</p>
     <div class="grid">
@@ -109,5 +104,17 @@
     <a class="ghost" href="/agents/list">Cancel</a>
   </div>
 </form>
+
+<section class="card">
+  <header class="page-header">
+    <h2>Knowledge</h2>
+    <p class="lead">Agent-specific Markdown knowledge, appended to this agent's system prompt at startup, after the <a href="/agents/defaults">common knowledge</a>.</p>
+  </header>
+  {{if .OriginalEmail}}
+  {{template "knowledge_editor" .Knowledge}}
+  {{else}}
+  <p class="hint">Save the agent first, then re-open it from <a href="/agents/list">Existing Agents</a> to manage its knowledge files.</p>
+  {{end}}
+</section>
 {{end}}
 {{end}}

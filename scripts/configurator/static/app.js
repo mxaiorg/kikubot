@@ -5,13 +5,15 @@
   // and the page warns on navigation away while changes are unsaved.
   // Programmatic value changes elsewhere in this file dispatch `input`
   // events so they count as dirty too.
+  // Forms marked [data-no-dirty] (e.g. the knowledge editor's per-file forms,
+  // which save immediately over HTMX) are exempt from dirty-tracking entirely.
   const dirtyForms = new WeakSet();
   const isDirty = () => {
     let any = false;
-    document.querySelectorAll("form").forEach((f) => { if (dirtyForms.has(f)) any = true; });
+    document.querySelectorAll("form:not([data-no-dirty])").forEach((f) => { if (dirtyForms.has(f)) any = true; });
     return any;
   };
-  document.querySelectorAll("form").forEach((form) => {
+  document.querySelectorAll("form:not([data-no-dirty])").forEach((form) => {
     // Skip submit buttons with a [formaction] override — they're side-actions
     // (e.g. "Generate self-signed certificate") that post to a different
     // endpoint and shouldn't be gated by the main form's dirty state.

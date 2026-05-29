@@ -1,0 +1,52 @@
+{{define "knowledge_editor"}}
+<div class="knowledge-editor" id="knowledge-editor">
+  {{if .Flash}}<div class="knowledge-flash {{.FlashKind}}">{{.Flash}}</div>{{end}}
+  <p class="hint">Markdown files in <code>{{.Dir}}/</code> are concatenated into the agent's system prompt in <strong>filename order</strong>. Use numeric prefixes (<code>01_</code>, <code>02_</code>, …) to control the order in which they are consumed — rename a file to re-order it.</p>
+
+  {{if .Files}}
+  <ol class="knowledge-list">
+    {{range $i, $f := .Files}}
+    <li class="knowledge-file">
+      <form method="post" action="/knowledge/save" data-no-dirty
+            hx-post="/knowledge/save" hx-target="#knowledge-editor" hx-swap="outerHTML">
+        <input type="hidden" name="scope" value="{{$.Scope}}">
+        <input type="hidden" name="oldname" value="{{$f.Name}}">
+        <div class="knowledge-file-head">
+          <span class="knowledge-order" title="Load order (filename order)">{{add $i 1}}</span>
+          <input class="knowledge-name" name="name" value="{{$f.Name}}" aria-label="Filename" spellcheck="false">
+          <div class="knowledge-file-actions">
+            <button type="submit" class="primary">Save</button>
+            <button type="button" class="danger"
+                    hx-post="/knowledge/delete" hx-include="closest form" hx-vals='{"name": {{$f.Name | printf "%q"}}}'
+                    hx-target="#knowledge-editor" hx-swap="outerHTML"
+                    hx-confirm="Delete {{$f.Name}}? This cannot be undone.">Delete</button>
+          </div>
+        </div>
+        <textarea class="knowledge-content" name="content" rows="8" spellcheck="false">{{$f.Content}}</textarea>
+      </form>
+    </li>
+    {{end}}
+  </ol>
+  {{else}}
+  <p class="hint empty-note">No knowledge files yet.</p>
+  {{end}}
+
+  <details class="knowledge-add"{{if .Draft.Name}} open{{end}}>
+    <summary>+ Add knowledge file</summary>
+    <form method="post" action="/knowledge/save" data-no-dirty
+          hx-post="/knowledge/save" hx-target="#knowledge-editor" hx-swap="outerHTML">
+      <input type="hidden" name="scope" value="{{.Scope}}">
+      <input type="hidden" name="oldname" value="">
+      <label><span class="field-label">Filename</span>
+        <input class="knowledge-name" name="name" value="{{.Draft.Name}}" placeholder="03_topic.md" spellcheck="false">
+      </label>
+      <label><span class="field-label">Content (Markdown)</span>
+        <textarea class="knowledge-content" name="content" rows="8" spellcheck="false" placeholder="# Topic&#10;&#10;Notes the agent should always have in context…">{{.Draft.Content}}</textarea>
+      </label>
+      <div class="actions">
+        <button type="submit" class="primary">Add file</button>
+      </div>
+    </form>
+  </details>
+</div>
+{{end}}

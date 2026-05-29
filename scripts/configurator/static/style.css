@@ -410,3 +410,71 @@ button:disabled, button.primary:disabled {
   font-size: 12px;
   padding: 6px 10px;
 }
+
+/* ---- knowledge editor ---- */
+.knowledge-editor { display: flex; flex-direction: column; gap: 14px; }
+.knowledge-flash {
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.knowledge-flash.success { background: rgba(63,185,80,0.12); border-color: var(--success); color: var(--success); }
+.knowledge-flash.error { background: rgba(248,81,73,0.12); border-color: var(--danger); color: var(--danger); }
+.knowledge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.knowledge-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+  padding: 12px;
+}
+.knowledge-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.knowledge-order {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.knowledge-name {
+  flex: 1 1 auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+.knowledge-file-actions { flex: none; display: flex; gap: 6px; }
+.knowledge-content {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+.knowledge-add { border: 1px dashed var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.knowledge-add summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.knowledge-add summary:hover { text-decoration: underline; }
+.knowledge-add[open] summary { margin-bottom: 12px; }
+.knowledge-add form { display: flex; flex-direction: column; gap: 10px; }
+.empty-note { font-style: italic; }
+button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+button.danger:hover { background: var(--danger); color: #fff; }

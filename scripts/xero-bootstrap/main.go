@@ -4,10 +4,11 @@
 //
 // Usage (from the kikubot repo root):
 //
-//	export XERO_CLIENT_ID=...                  # from developer.xero.com
-//	export XERO_CLIENT_SECRET=...
-//	export XERO_REDIRECT_URI=http://localhost:8080/callback   # must match portal
-//	go run ./cmd/xero-bootstrap -out data/<agent>/xero/tokens.json
+//		export XERO_CLIENT_ID=...                  # from developer.xero.com
+//		export XERO_CLIENT_SECRET=...
+//		export XERO_REDIRECT_URI=http://localhost:8080/callback   # must match portal
+//	 # replace <agent> with the actual agent name, e.g. "alice"
+//		go run ./scripts/xero-bootstrap -out data/<agent>/xero/tokens.json
 //
 // The redirect URI must match exactly what's registered for your WebApp at
 // https://developer.xero.com/app/manage. The default is

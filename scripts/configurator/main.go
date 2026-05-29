@@ -77,6 +77,9 @@ func main() {
 	mux.HandleFunc("/agents/save", s.handleAgentSave)
 	mux.HandleFunc("/email-service", s.handleEmailService)
 	mux.HandleFunc("/email-service/cert", s.handleEmailServiceCert)
+	mux.HandleFunc("/knowledge", s.handleKnowledge)
+	mux.HandleFunc("/knowledge/save", s.handleKnowledgeSave)
+	mux.HandleFunc("/knowledge/delete", s.handleKnowledgeDelete)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 
 	httpSrv := &http.Server{
@@ -111,18 +114,22 @@ func fatal(format string, args ...any) {
 // own *template.Template, keyed by page name. We re-define `page` per file,
 // so they cannot share a single tree.
 func buildTemplates() (map[string]*template.Template, error) {
-	pages := []string{"home", "defaults", "agent_form", "agents_list", "email_service"}
-	files := map[string]string{
-		"home":          "templates/home.html",
-		"defaults":      "templates/defaults.html",
-		"agent_form":    "templates/agent_form.html",
-		"agents_list":   "templates/agents_list.html",
-		"email_service": "templates/email_service.html",
+	// Each page parses layout.html plus its own file(s). The "defaults" and
+	// "agent_form" pages also include knowledge.html, which defines the
+	// "knowledge_editor" partial they embed.
+	files := map[string][]string{
+		"home":          {"templates/layout.html", "templates/home.html"},
+		"defaults":      {"templates/layout.html", "templates/defaults.html", "templates/knowledge.html"},
+		"agent_form":    {"templates/layout.html", "templates/agent_form.html", "templates/knowledge.html"},
+		"agents_list":   {"templates/layout.html", "templates/agents_list.html"},
+		"email_service": {"templates/layout.html", "templates/email_service.html"},
+		// Standalone partial for HTMX save/delete responses.
+		"knowledge_editor": {"templates/knowledge.html"},
 	}
-	out := make(map[string]*template.Template, len(pages))
-	for _, name := range pages {
+	out := make(map[string]*template.Template, len(files))
+	for name, srcs := range files {
 		t := template.New(name).Funcs(templateFuncs)
-		t, err := t.ParseFS(templatesFS, "templates/layout.html", files[name])
+		t, err := t.ParseFS(templatesFS, srcs...)
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", name, err)
 		}

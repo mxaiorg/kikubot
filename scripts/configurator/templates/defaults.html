@@ -46,5 +46,13 @@
     <button type="submit" class="primary">Save defaults</button>
   </div>
 </form>
+
+<section class="card">
+  <header class="page-header">
+    <h2>Common Knowledge</h2>
+    <p class="lead">Markdown knowledge shared by every agent. Saved to <code>configs/knowledge/common/</code> and appended to each agent's system prompt at startup.</p>
+  </header>
+  {{template "knowledge_editor" .Knowledge}}
+</section>
 {{end}}
 {{end}}

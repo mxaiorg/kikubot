@@ -234,6 +234,7 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `salesforce_mcp`       | Salesforce CRM via the `@tsmztech/mcp-server-salesforce` MCP server.                                  |
 | `buffer_mcp`           | Schedule social posts via Buffer's MCP.                                                               |
 | `xero_mcp`             | Xero accounting via MCP.                                                                              |
+| `xero_api`             | Xero accounting via API.                                                                              |
 | `mxmcp`                | mxHERO email-search MCP.                                                                              |
 | `wordpress`            | Read/write posts on a WordPress site.                                                                 |
 | `helpjuice`            | Read/write FAQ articles in Helpjuice.                                                                 |

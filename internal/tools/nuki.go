@@ -1,12 +1,11 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"kikubot/internal/config"
+	"kikubot/internal/services"
 	"log"
 	"net/http"
 	"net/url"
@@ -34,13 +33,9 @@ import (
 //       agent Knowledge) to discover the correct integer id.
 //
 // Auth: NUKI_API_TOKEN sent as `Authorization: Bearer …`.
-
-const nukiBaseURL = "https://api.nuki.io"
-
-// authTypeKeypad is the SmartlockAuth.type value for a keypad code (per swagger:
-// "0 .. app, 1 .. bridge, 2 .. fob, 3 .. keypad, 13 .. keypad code"). 13 is the
-// value used when creating a new keypad PIN authorization.
-const authTypeKeypad = 13
+//
+// The HTTP transport lives in services.NukiRequest so the private `nuki_native`
+// tool can share it.
 
 func Nuki() []ToolDefinition {
 	if strings.TrimSpace(config.NukiApiToken) == "" {
@@ -76,7 +71,7 @@ func nukiListSmartlocksTool() ToolDefinition {
 			"properties": {}
 		}`),
 		Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
-			body, err := nukiRequest(ctx, http.MethodGet, "/smartlock", nil)
+			body, err := services.NukiRequest(ctx, http.MethodGet, "/smartlock", nil)
 			if err != nil {
 				return "", err
 			}
@@ -117,7 +112,7 @@ func nukiCreateAccountUserTool() ToolDefinition {
 			if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Email) == "" {
 				return "", fmt.Errorf("name and email are required")
 			}
-			body, err := nukiRequest(ctx, http.MethodPut, "/account/user", p)
+			body, err := services.NukiRequest(ctx, http.MethodPut, "/account/user", p)
 			if err != nil {
 				return "", err
 			}
@@ -152,7 +147,7 @@ func nukiGetAccountUserTool() ToolDefinition {
 			}
 			if p.AccountUserID > 0 {
 				path := fmt.Sprintf("/account/user/%d", p.AccountUserID)
-				body, err := nukiRequest(ctx, http.MethodGet, path, nil)
+				body, err := services.NukiRequest(ctx, http.MethodGet, path, nil)
 				if err != nil {
 					return "", err
 				}
@@ -172,7 +167,7 @@ func nukiGetAccountUserTool() ToolDefinition {
 			if enc := q.Encode(); enc != "" {
 				path += "?" + enc
 			}
-			body, err := nukiRequest(ctx, http.MethodGet, path, nil)
+			body, err := services.NukiRequest(ctx, http.MethodGet, path, nil)
 			if err != nil {
 				return "", err
 			}
@@ -222,7 +217,7 @@ func nukiUpdateAccountUserTool() ToolDefinition {
 				return "", fmt.Errorf("at least one of name, email, or language must be provided")
 			}
 			path := fmt.Sprintf("/account/user/%d", p.AccountUserID)
-			respBody, err := nukiRequest(ctx, http.MethodPost, path, body)
+			respBody, err := services.NukiRequest(ctx, http.MethodPost, path, body)
 			if err != nil {
 				return "", err
 			}
@@ -256,7 +251,7 @@ func nukiDeleteAccountUserTool() ToolDefinition {
 				return "", fmt.Errorf("account_user_id is required")
 			}
 			path := fmt.Sprintf("/account/user/%d", p.AccountUserID)
-			respBody, err := nukiRequest(ctx, http.MethodDelete, path, nil)
+			respBody, err := services.NukiRequest(ctx, http.MethodDelete, path, nil)
 			if err != nil {
 				return "", err
 			}
@@ -294,9 +289,9 @@ func nukiListKeypadCodesTool() ToolDefinition {
 				return "", fmt.Errorf("smartlock_id is required")
 			}
 			q := url.Values{}
-			q.Set("types", fmt.Sprintf("%d", authTypeKeypad))
+			q.Set("types", fmt.Sprintf("%d", services.NukiAuthTypeKeypad))
 			path := fmt.Sprintf("/smartlock/%d/auth?%s", p.SmartlockID, q.Encode())
-			body, err := nukiRequest(ctx, http.MethodGet, path, nil)
+			body, err := services.NukiRequest(ctx, http.MethodGet, path, nil)
 			if err != nil {
 				return "", err
 			}
@@ -356,7 +351,7 @@ func nukiSetKeypadCodeTool() ToolDefinition {
 
 			body := map[string]any{
 				"name": p.Name,
-				"type": authTypeKeypad,
+				"type": services.NukiAuthTypeKeypad,
 				"code": p.Code,
 			}
 			// remoteAllowed is marked required by the swagger; default to false when unset.
@@ -385,7 +380,7 @@ func nukiSetKeypadCodeTool() ToolDefinition {
 			}
 
 			path := fmt.Sprintf("/smartlock/%d/auth", p.SmartlockID)
-			respBody, err := nukiRequest(ctx, http.MethodPut, path, body)
+			respBody, err := services.NukiRequest(ctx, http.MethodPut, path, body)
 			if err != nil {
 				return "", err
 			}
@@ -427,7 +422,7 @@ func nukiDeleteKeypadCodeTool() ToolDefinition {
 				return "", fmt.Errorf("auth_id is required")
 			}
 			path := fmt.Sprintf("/smartlock/%d/auth/%s", p.SmartlockID, url.PathEscape(p.AuthID))
-			respBody, err := nukiRequest(ctx, http.MethodDelete, path, nil)
+			respBody, err := services.NukiRequest(ctx, http.MethodDelete, path, nil)
 			if err != nil {
 				return "", err
 			}
@@ -437,41 +432,4 @@ func nukiDeleteKeypadCodeTool() ToolDefinition {
 			return string(respBody), nil
 		},
 	}
-}
-
-// ── HTTP helper ─────────────────────────────────────────────────────────
-
-func nukiRequest(ctx context.Context, method, path string, body any) ([]byte, error) {
-	var reader io.Reader
-	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("encoding request body: %w", err)
-		}
-		reader = bytes.NewReader(buf)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, nukiBaseURL+path, reader)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+config.NukiApiToken)
-	req.Header.Set("Accept", "application/json")
-	if reader != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("nuki request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("nuki API error (HTTP %d): %s", resp.StatusCode, string(respBody))
-	}
-	return respBody, nil
 }

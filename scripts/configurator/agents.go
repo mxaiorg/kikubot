@@ -79,10 +79,11 @@ type agentForm struct {
 	Tools    []string
 
 	// Render-only.
-	Registry                 []toolInfo `json:"-"`
-	CoordinatorPromptDefault string     `json:"-"`
-	HasAnthropicKey          bool       `json:"-"`
-	HasOpenRouterKey         bool       `json:"-"`
+	Registry                 []toolInfo    `json:"-"`
+	CoordinatorPromptDefault string        `json:"-"`
+	HasAnthropicKey          bool          `json:"-"`
+	HasOpenRouterKey         bool          `json:"-"`
+	Knowledge                knowledgeView `json:"-"`
 }
 
 // validate runs basic input checks.

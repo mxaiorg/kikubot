@@ -117,7 +117,15 @@ func (s *server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, "defaults", pageData{Active: "defaults", Data: d})
+	view := defaultsView{commonDefaults: d, Knowledge: buildKnowledgeView(s.root, knowledgeScopeCommon)}
+	s.render(w, r, "defaults", pageData{Active: "defaults", Data: view})
+}
+
+// defaultsView combines the editable common: knobs with the common knowledge
+// editor so the Agent Defaults page can render both.
+type defaultsView struct {
+	*commonDefaults
+	Knowledge knowledgeView
 }
 
 // ---- Add / Edit Agent ----
@@ -149,6 +157,7 @@ func (s *server) handleAgentEdit(w http.ResponseWriter, r *http.Request) {
 	a.Registry, _ = loadToolRegistry(s.root)
 	_, a.CoordinatorPromptDefault = commonPromptDefaults(s.root)
 	a.HasAnthropicKey, a.HasOpenRouterKey = hasLLMKeys(s.root)
+	a.Knowledge = buildKnowledgeView(s.root, email)
 	s.render(w, r, "agent_form", pageData{Active: "list", Data: a})
 }
 
@@ -348,12 +357,89 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
+// ---- Knowledge ----
+
+// renderKnowledge writes the standalone knowledge editor partial — the HTMX
+// swap target for save/delete responses.
+func (s *server) renderKnowledge(w http.ResponseWriter, v knowledgeView) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpls["knowledge_editor"].ExecuteTemplate(w, "knowledge_editor", v); err != nil {
+		log.Printf("render knowledge: %v", err)
+		http.Error(w, "render error", http.StatusInternalServerError)
+	}
+}
+
+// handleKnowledge renders the editor for a scope (GET ?scope=common|<email>).
+func (s *server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
+	s.renderKnowledge(w, buildKnowledgeView(s.root, r.URL.Query().Get("scope")))
+}
+
+// handleKnowledgeSave creates/updates/renames a knowledge file, then re-renders
+// the editor. On error the attempted edit is preserved in the re-rendered form
+// so the operator doesn't lose what they typed.
+func (s *server) handleKnowledgeSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.renderKnowledge(w, buildKnowledgeView(s.root, r.URL.Query().Get("scope")))
+		return
+	}
+	_ = r.ParseForm()
+	scope := r.FormValue("scope")
+	oldName := r.FormValue("oldname")
+	name := r.FormValue("name")
+	content := r.FormValue("content")
+
+	err := saveKnowledgeFile(s.root, scope, oldName, name, content)
+	v := buildKnowledgeView(s.root, scope)
+	if err != nil {
+		// Re-inject the attempted edit so it survives the re-render.
+		if strings.TrimSpace(oldName) == "" {
+			v.Draft = knowledgeFile{Name: name, Content: content}
+		} else {
+			for i := range v.Files {
+				if v.Files[i].Name == oldName {
+					v.Files[i].Name = name
+					v.Files[i].Content = content
+					break
+				}
+			}
+		}
+		v.Flash, v.FlashKind = "Save failed: "+err.Error(), "error"
+	} else {
+		saved := name
+		if n, nErr := validKnowledgeName(name); nErr == nil {
+			saved = n
+		}
+		v.Flash, v.FlashKind = "Saved "+v.Dir+"/"+saved, "success"
+	}
+	s.renderKnowledge(w, v)
+}
+
+// handleKnowledgeDelete removes a knowledge file, then re-renders the editor.
+func (s *server) handleKnowledgeDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.renderKnowledge(w, buildKnowledgeView(s.root, r.URL.Query().Get("scope")))
+		return
+	}
+	_ = r.ParseForm()
+	scope := r.FormValue("scope")
+	name := r.FormValue("name")
+	err := deleteKnowledgeFile(s.root, scope, name)
+	v := buildKnowledgeView(s.root, scope)
+	if err != nil {
+		v.Flash, v.FlashKind = "Delete failed: "+err.Error(), "error"
+	} else {
+		v.Flash, v.FlashKind = "Deleted "+name, "success"
+	}
+	s.renderKnowledge(w, v)
+}
+
 // templateFuncs is exposed for parsing.
 var templateFuncs = template.FuncMap{
 	"joinCSV":       joinCSV,
 	"join":          strings.Join,
 	"toolsDataAttr": toolsDataAttr,
 	"infoIcon":      infoIcon,
+	"add":           func(a, b int) int { return a + b },
 }
 
 // infoIcon renders a small clickable info marker that shows `text` in a popover

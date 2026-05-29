@@ -20,7 +20,7 @@ RUN npm install -g @xeroapi/xero-mcp-server
 # https://developer.box.com/guides/cli/cli-with-jwt-authentication/jwt-cli
 # Box CLI auth: copy your Box app services JSON into the image, then
 # uncomment the following line to register it as an environment.
-RUN npm install --global @box/cli
+#RUN npm install --global @box/cli
 #COPY box_config.json /app/box_config.json
 #RUN npx -y @box/cli configure:environments:add /app/box_config.json
 # https://developer.box.com/guides/cli/cli-with-jwt-authentication/jwt-cli
