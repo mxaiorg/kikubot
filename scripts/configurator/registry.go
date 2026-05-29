@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -93,55 +95,79 @@ func loadToolRegistry(root string) ([]toolInfo, error) {
 // collectPrivateRegistrations statically scans a directory for
 // `tools.Register("key", factory, "description")` calls (typically inside an
 // init() in package toolspriv) and returns the keys in sorted order plus any
-// literal descriptions. A missing/unparseable directory yields nothing — a
-// public checkout simply has no private tools to surface.
+// literal descriptions. A missing directory yields nothing — a public checkout
+// simply has no private tools to surface.
+//
+// Each .go file is parsed independently (test files are ignored): a single
+// unparseable file is logged and skipped rather than wiping out discovery for
+// the whole directory. The final tally is logged so a deployment that finds no
+// private tools — despite files being present — is visible in the logs instead
+// of failing silently.
 func collectPrivateRegistrations(dir string) (keys []string, desc map[string]string) {
 	desc = map[string]string{}
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, 0)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("configurator: cannot read private tools dir %s: %v", dir, err)
+		}
 		return nil, desc
 	}
+
+	fset := token.NewFileSet()
 	seen := map[string]bool{}
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Register" {
-					return true
-				}
-				if x, ok := sel.X.(*ast.Ident); !ok || x.Name != "tools" {
-					return true
-				}
-				if len(call.Args) < 1 {
-					return true
-				}
-				lit, ok := call.Args[0].(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				key, err := strconv.Unquote(lit.Value)
-				if err != nil || key == "" {
-					return true
-				}
-				if !seen[key] {
-					seen[key] = true
-					keys = append(keys, key)
-				}
-				if len(call.Args) >= 3 {
-					if d := stringExpr(call.Args[2]); d != "" {
-						desc[key] = d
-					}
-				}
-				return true
-			})
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
+		path := filepath.Join(dir, name)
+		file, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			// Don't let one broken file blank the entire private list.
+			log.Printf("configurator: skipping unparseable private tool file %s: %v", path, perr)
+			continue
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Register" {
+				return true
+			}
+			if x, ok := sel.X.(*ast.Ident); !ok || x.Name != "tools" {
+				return true
+			}
+			if len(call.Args) < 1 {
+				return true
+			}
+			lit, ok := call.Args[0].(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			key, uErr := strconv.Unquote(lit.Value)
+			if uErr != nil || key == "" {
+				return true
+			}
+			if !seen[key] {
+				seen[key] = true
+				keys = append(keys, key)
+			}
+			if len(call.Args) >= 3 {
+				if d := stringExpr(call.Args[2]); d != "" {
+					desc[key] = d
+				}
+			}
+			return true
+		})
 	}
 	sort.Strings(keys)
+	if len(keys) == 0 {
+		log.Printf("configurator: no private tool registrations found in %s", dir)
+	} else {
+		log.Printf("configurator: discovered %d private tool(s) in %s: %v", len(keys), dir, keys)
+	}
 	return keys, desc
 }
 
