@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -14,6 +15,7 @@ import (
 type toolInfo struct {
 	Key         string // key in registry map (e.g. "report")
 	Description string // joined Description from all ToolDefinitions returned
+	Private     bool   // registered dynamically from internal/tools_priv (only in a -tags=private build)
 }
 
 // loadToolRegistry parses internal/tools/*.go on demand and returns the
@@ -70,7 +72,77 @@ func loadToolRegistry(root string) ([]toolInfo, error) {
 		}
 		infos = append(infos, toolInfo{Key: k, Description: desc})
 	}
+
+	// Private tools (internal/tools_priv) aren't in the static registry literal —
+	// they self-register at runtime via tools.Register(...) from an init(). Read
+	// those calls statically too so the picker can offer them, flagged private.
+	seen := make(map[string]bool, len(infos))
+	for _, i := range infos {
+		seen[i.Key] = true
+	}
+	privKeys, privDesc := collectPrivateRegistrations(filepath.Join(root, "internal", "tools_priv"))
+	for _, k := range privKeys {
+		if seen[k] {
+			continue
+		}
+		infos = append(infos, toolInfo{Key: k, Description: privDesc[k], Private: true})
+	}
 	return infos, nil
+}
+
+// collectPrivateRegistrations statically scans a directory for
+// `tools.Register("key", factory, "description")` calls (typically inside an
+// init() in package toolspriv) and returns the keys in sorted order plus any
+// literal descriptions. A missing/unparseable directory yields nothing — a
+// public checkout simply has no private tools to surface.
+func collectPrivateRegistrations(dir string) (keys []string, desc map[string]string) {
+	desc = map[string]string{}
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, nil, 0)
+	if err != nil {
+		return nil, desc
+	}
+	seen := map[string]bool{}
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Register" {
+					return true
+				}
+				if x, ok := sel.X.(*ast.Ident); !ok || x.Name != "tools" {
+					return true
+				}
+				if len(call.Args) < 1 {
+					return true
+				}
+				lit, ok := call.Args[0].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				key, err := strconv.Unquote(lit.Value)
+				if err != nil || key == "" {
+					return true
+				}
+				if !seen[key] {
+					seen[key] = true
+					keys = append(keys, key)
+				}
+				if len(call.Args) >= 3 {
+					if d := stringExpr(call.Args[2]); d != "" {
+						desc[key] = d
+					}
+				}
+				return true
+			})
+		}
+	}
+	sort.Strings(keys)
+	return keys, desc
 }
 
 // collectStringMap finds `var <name> = map[string]string{...}` in a file and

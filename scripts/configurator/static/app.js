@@ -159,6 +159,17 @@
     let tools = {};
     try { tools = JSON.parse(root.dataset.tools || "{}"); } catch (_) {}
     const allKeys = Object.keys(tools).sort();
+    // Keys registered from internal/tools_priv — only usable in a -tags=private
+    // build. Flagged with a small "private" badge in chips and the picker.
+    const privateKeys = new Set((root.dataset.privateTools || "").split(",").map(s => s.trim()).filter(Boolean));
+    const privateNote = "Private tool — only available in a build compiled with -tags=private.";
+    const privateBadge = () => {
+      const b = document.createElement("span");
+      b.className = "chip-private";
+      b.textContent = "private";
+      b.title = privateNote;
+      return b;
+    };
     const hidden = root.querySelector("input[type=hidden]");
     const list = root.querySelector(".chips-list");
     const addBtn = root.querySelector(".add-chip");
@@ -244,6 +255,7 @@
         label.className = "chip-label";
         label.textContent = k;
         chip.appendChild(label);
+        if (privateKeys.has(k)) chip.appendChild(privateBadge());
 
         const x = document.createElement("button");
         x.type = "button";
@@ -260,7 +272,10 @@
         const b = document.createElement("button");
         b.type = "button";
         b.title = tools[k] || "";
-        b.textContent = k;
+        const kl = document.createElement("span");
+        kl.textContent = k;
+        b.appendChild(kl);
+        if (privateKeys.has(k)) b.appendChild(privateBadge());
         b.addEventListener("click", () => {
           set([...get(), k]);
           picker.classList.add("is-hidden");

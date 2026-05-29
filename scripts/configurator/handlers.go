@@ -435,11 +435,25 @@ func (s *server) handleKnowledgeDelete(w http.ResponseWriter, r *http.Request) {
 
 // templateFuncs is exposed for parsing.
 var templateFuncs = template.FuncMap{
-	"joinCSV":       joinCSV,
-	"join":          strings.Join,
-	"toolsDataAttr": toolsDataAttr,
-	"infoIcon":      infoIcon,
-	"add":           func(a, b int) int { return a + b },
+	"joinCSV":          joinCSV,
+	"join":             strings.Join,
+	"toolsDataAttr":    toolsDataAttr,
+	"privateToolsAttr": privateToolsAttr,
+	"infoIcon":         infoIcon,
+	"add":              func(a, b int) int { return a + b },
+}
+
+// privateToolsAttr returns a comma-separated list of the registry keys that
+// are private (registered from internal/tools_priv). The chip UI uses it to
+// badge those tools as only-available-in-a-private-build.
+func privateToolsAttr(infos []toolInfo) string {
+	var keys []string
+	for _, t := range infos {
+		if t.Private {
+			keys = append(keys, t.Key)
+		}
+	}
+	return strings.Join(keys, ",")
 }
 
 // infoIcon renders a small clickable info marker that shows `text` in a popover
