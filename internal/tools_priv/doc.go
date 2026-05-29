@@ -1,11 +1,11 @@
 // Package toolspriv holds company-specific ("private") tool implementations
-// that should not ship in the default build.
+// that should not ship in the public repo.
 //
-// Files in this package must carry the `//go:build private` constraint so the
-// public binary compiles cleanly without them. Build the private variant with:
-//
-//	go build -tags=private ./cmd/kikubot
-//	go run   -tags="dev private" ./cmd/kikubot
+// These files are gated by presence, not by a build tag: they are not
+// committed to the public repository, so a public checkout simply has no
+// files here and the package contributes nothing. When the private files are
+// present in this directory they are always compiled in — cmd/kikubot
+// blank-imports this package unconditionally so each tool's init() runs.
 //
 // # Secrets convention
 //
@@ -13,15 +13,13 @@
 // internal/config/env_vars.go as exported package vars), private tools read
 // their secrets directly with os.Getenv inside this package. The env vars
 // still live in configs/secrets.env — which is gitignored and already loaded
-// into every container — but no symbol referencing them appears outside the
-// `private` build. That keeps the public binary unaware that the tool, or its
+// into every container — but no symbol referencing them appears in the public
+// repo. That keeps the public codebase unaware that the tool, or its
 // credentials, exist.
 //
 // To add a private tool:
 //
-//  1. Drop a new file here, e.g. `acme.go`, with the build tag at the top:
-//
-//     //go:build private
+//  1. Drop a new file here, e.g. `acme.go`:
 //
 //     package toolspriv
 //
@@ -50,6 +48,5 @@
 //  3. Reference the key ("acme") from the agent's `tools:` list in
 //     configs/agents.yaml.
 //
-// The cmd/kikubot package has a matching build-tagged blank import that pulls
-// this package into the binary so the init() runs.
+// The cmd/kikubot package blank-imports this package so the init() runs.
 package toolspriv

@@ -15,7 +15,7 @@ import (
 type toolInfo struct {
 	Key         string // key in registry map (e.g. "report")
 	Description string // joined Description from all ToolDefinitions returned
-	Private     bool   // registered dynamically from internal/tools_priv (only in a -tags=private build)
+	Private     bool   // registered dynamically from internal/tools_priv (present only when private source is deployed)
 }
 
 // loadToolRegistry parses internal/tools/*.go on demand and returns the

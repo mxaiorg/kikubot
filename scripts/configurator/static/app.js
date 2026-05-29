@@ -159,10 +159,11 @@
     let tools = {};
     try { tools = JSON.parse(root.dataset.tools || "{}"); } catch (_) {}
     const allKeys = Object.keys(tools).sort();
-    // Keys registered from internal/tools_priv — only usable in a -tags=private
-    // build. Flagged with a small "private" badge in chips and the picker.
+    // Keys registered from internal/tools_priv — company-specific tools that
+    // aren't in the public repo. Flagged with a "private" badge in chips and
+    // the picker, and only usable when the private source is deployed.
     const privateKeys = new Set((root.dataset.privateTools || "").split(",").map(s => s.trim()).filter(Boolean));
-    const privateNote = "Private tool — only available in a build compiled with -tags=private.";
+    const privateNote = "Private tool — only works when its source is present in internal/tools_priv (not in the public repo).";
     const privateBadge = () => {
       const b = document.createElement("span");
       b.className = "chip-private";
