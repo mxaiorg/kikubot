@@ -8,15 +8,15 @@
 <form class="card" method="post" action="/email-service" data-email-form{{if .Dirty}} data-initial-dirty{{end}}>
   <label class="checkbox">
     <input type="checkbox" name="enabled" id="email-enabled" value="1" {{if .Enabled}}checked{{end}}>
-    Use this service {{infoIcon "TBD"}}
+    Use this service {{infoIcon "Select to enable configuration of the bundled email server."}}
   </label>
   <fieldset id="email-fields" {{if not .Enabled}}disabled{{end}}>
     <div class="grid">
-      <label><span class="field-label">Email Server Hostname {{infoIcon "TBD"}}</span>
+      <label><span class="field-label">IMAP Email Server Hostname {{infoIcon "The hostname of the email server where accounts reside."}}</span>
         <input id="email-hostname" name="hostname" value="{{.Hostname}}" placeholder="mail.example.com">
         <small class="hint">Set the hostname of this machine. Pre-populated from <code>services/dms/docker-compose.yml</code> when present.</small>
       </label>
-      <label><span class="field-label">Agent email domain {{infoIcon "TBD"}}</span>
+      <label><span class="field-label">Agent email domain {{infoIcon "The email domain used by agent accounts. Defaults to the parent domain of the hostname."}}</span>
         <input id="email-domain" name="agent_domain" value="{{.AgentDomain}}" placeholder="agents.example.com">
         <small class="hint">Set the email domain. Defaults to the parent domain of the hostname.</small>
       </label>
@@ -28,26 +28,26 @@
     </fieldset>
 
     <fieldset class="subcard">
-      <legend>Delivery Security</legend>
+      <legend>Send Restrictions</legend>
       <label class="checkbox">
         <input type="checkbox" name="limit_delivery" id="limit-delivery" value="1" {{if .LimitDelivery}}checked{{end}}>
-        Limit the domains to which agents can respond {{infoIcon "TBD"}}
+        Limit the domains to which agents can send to {{infoIcon "A list of domains to which agents can respond to. Mail to any other domain is rejected. Mail within the agent email domain is allowed by default. If left empty, there will be no restrictions."}}
       </label>
-      <label class="full" data-show-when="limit-delivery"><span class="field-label">Allowed delivery domains {{infoIcon "TBD"}}</span>
+      <label class="full" data-show-when="limit-delivery"><span class="field-label">Allowed delivery domains {{infoIcon "To which domains can agents send email."}}</span>
         <input name="delivery_domains" value="{{joinCSV .DeliveryDomains}}" placeholder="company.com, partner.com">
         <small class="hint">Comma-separated list. Mail to any other domain is rejected. Mail within the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
       </label>
     </fieldset>
 
     <fieldset class="subcard">
-      <legend>Accept Restriction</legend>
+      <legend>Receive Restrictions</legend>
       <label class="checkbox">
         <input type="checkbox" name="limit_accept" id="limit-accept" value="1" {{if .LimitAccept}}checked{{end}}>
-        Limit from which domains or email addresses agents can receive emails {{infoIcon "TBD"}}
+        Limit from which domains agents can receive emails {{infoIcon "From which domains can agents receive email."}}
       </label>
-      <label class="full" data-show-when="limit-accept"><span class="field-label">Allowed sender domains/emails {{infoIcon "TBD"}}</span>
+      <label class="full" data-show-when="limit-accept"><span class="field-label">Allowed sender domains/emails {{infoIcon "From which domains can agents receive email."}}</span>
         <input name="accept_domains" value="{{joinCSV .AcceptDomains}}" placeholder="company.com, partner@example.com">
-        <small class="hint">Comma-separated list of domains and/or email addresses. Mail from the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
+        <small class="hint">Comma-separated list of domains. Mail from the agent email domain, <code data-agent-domain-display>{{.AgentDomain}}</code>, allowed by default.</small>
       </label>
     </fieldset>
 
