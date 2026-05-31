@@ -164,6 +164,14 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 	// without depending on LLM-provided headers.
 	ctx = services.WithSourceEmail(ctx, email)
 
+	// Attach a per-invocation send tracker. send tools call MarkDelivered on
+	// successful SMTP; set_task_status consults the counter and refuses to
+	// transition to waiting/complete when nothing has been delivered. This
+	// prevents the silent-dead-state failure where the agent writes a reply
+	// only as assistant text, marks the task waiting, and the recipient is
+	// never told. See internal/services/send_tracker.go.
+	ctx = services.WithSendTracker(ctx)
+
 	for turn := 0; turn < maxTurns; turn++ {
 		// Check context before making the API call so we don't fire a
 		// request we already know will fail.

@@ -44,6 +44,41 @@ func setTaskStatus(ctx context.Context, input json.RawMessage) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Forcing function for the "agent wrote a reply only as assistant text,
+	// never invoked a send tool" failure mode. If this invocation hasn't
+	// successfully delivered any outbound mail, refuse to mark the task as
+	// waiting or complete — those states would otherwise leave the recipient
+	// silent and the agent (or its upstream caller) stuck waiting for a
+	// reply to a message that was never sent.
+	//
+	// The error tool_result feeds back to the model, which on the next turn
+	// typically corrects by calling the appropriate send tool first.
+	//
+	// Caveats:
+	//   - Gate active only when WithSendTracker decorated ctx. CLI tools,
+	//     tests, and ad-hoc scripts that invoke set_task_status outside a
+	//     HandleMessage turn are not gated.
+	//   - `error` is allowed in all cases: it's the legitimate abort path
+	//     for "I can't complete this and have nothing useful to say."
+	//   - Same-turn ordering: if the model emits set_task_status BEFORE its
+	//     send tool in a single turn, the gate fires once and the next turn
+	//     re-issues the status update successfully. One wasted turn at most.
+	if services.HasSendTracker(ctx) && services.DeliveryCount(ctx) == 0 {
+		if params.Status == string(services.MemoryStatus_Waiting) || params.Status == string(services.MemoryStatus_Complete) {
+			return "", fmt.Errorf(
+				"cannot set status to %q before delivering a message — no send "+
+					"tool has been called this turn. Your assistant text is not "+
+					"visible to the recipient; the only way to communicate is to "+
+					"call report_strict_tool (or report_tool / message_tool, "+
+					"whichever your toolset provides). Send the message first, "+
+					"then update the status. If you genuinely have nothing to "+
+					"deliver and want to abort, set status to %q instead.",
+				params.Status, services.MemoryStatus_Error,
+			)
+		}
+	}
+
 	messageId := services.EnsureAngleBrackets(params.MessageId)
 	err := services.SetMemoryStatus(ctx, services.MemoryStatus(params.Status), messageId)
 	if err != nil {

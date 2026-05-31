@@ -317,6 +317,11 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 		log.Printf("error sending email: %s", err)
 		return "", err
 	}
+	// Tell the per-invocation tracker we delivered something. This is what
+	// unlocks set_task_status's "waiting"/"complete" gate — call it only on
+	// successful SMTP, never speculatively, otherwise a failed send would
+	// still let the agent close out the task as if it had replied.
+	services.MarkDelivered(ctx)
 	return "Success", nil
 }
 
