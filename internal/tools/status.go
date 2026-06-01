@@ -89,7 +89,8 @@ func setTaskStatus(ctx context.Context, input json.RawMessage) (string, error) {
 
 	// Arm the stuck-task watchdog when entering "waiting". A coordinator that
 	// delegates and waits has no other deadline — if the delegate never
-	// replies, the thread hangs forever. The watchdog re-wakes this agent after the configured
+	// replies, the thread hangs forever (the failure mode that black-holed the
+	// JFE flag task). The watchdog re-wakes this agent after the configured
 	// deadline if the thread is still waiting. Use the trusted inbound message
 	// from ctx, never LLM input, so the replay targets the real message. Gated
 	// on a real send this turn (DeliveryCount) so we don't arm a watchdog for a
