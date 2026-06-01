@@ -17,6 +17,17 @@ Kikubot turns an email account into an autonomous agent. Each running container 
 
 **Why email?** It's the universal asynchronous message bus: humans already use it, every system can send to it, threads carry their own history (`References:` / `In-Reply-To:`), and accounts give you free per-agent identity, ACLs, and durability.
 
+**Benefits:**
+
+- **Email as the AI User Interface.** Deploy AI to an organization via the most used and understood technology - email. No training required, no software to install - just an email address.
+- **High Scalability.** Clusters of agents, each agent can be its own cluster - results in theoretically massive scalability.
+- **Observability.** Agents communicate with each other via standard email. Access agent accounts to see their internal conversation history.
+- **Cost Containment.** Each agent can be configured to a different LLM. Choose the best LLM for the agent's role and toolset.
+- **Higher Performance.** Agents can specialize. Capabilities are distributed across the agent network. Each agent focuses on its area of expertise.
+- **Greater Security.** No risk of AI agents running on user machines. Kikubot Agents run in containers, providing isolation and security. Agents access tools and integrations via scoped API keys. Access to agents is easily controlled via ACLs (white or blacklist domains, or email addresses).
+- **Resilience.** Kikubot networks run over email - one of the most resilient technologies in the world.
+
+
 **At a glance:**
 
 - **Per-thread memory.** Each email thread is a long-running conversation; the agent's history is persisted as JSON keyed by the thread's root Message-Id.
@@ -32,6 +43,19 @@ Kikubot turns an email account into an autonomous agent. Each running container 
 You can spawn one or more agent containers with this repository on the same machine. Each container runs a single agent. You can also deploy this repository across multiple machines and spawn agents across your organization. The only requirement is that coordinator agents can reach each other via email.
 
 Coordinator agents can be organized into teams, and each team can have multiple agents. Coordinator agents team members can in themselves be coordinators. Much like how organizations are structured into divisions, with each division representing multiple departments which in turn represent multiple teams – so can you structure your network of agents. Each coordinator only needs to know the subset of agents it works with directly. Theoretically, a Kikubot deployment can scale to hundreds of thousands of agents.
+
+## Live Demo
+
+_Ask Alpha about the weather in your town. Email your query to `alpha@labtest.mxhero.com`_.
+
+<p align="center">
+  <!-- TODO: replace with the project logo -->
+  <img src="assets/WeatherDemo.png" alt="kikubot">
+</p>
+
+mxHERO Labs has deployed a Kikubot instance to a single machine. The instance is configured with 2 agents: Alpha and Weatherman. Alpha is the coordinator. If you send an email to Alpha asking about the weather in some city, Alpha will ask the weatherman for the weather forecast. Upon receiving the response, Alpha will send a reply to you.
+
+This small Kikubot demo illustrates how multiple agents can work together over email
 
 ## References
 
