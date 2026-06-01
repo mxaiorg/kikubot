@@ -493,3 +493,18 @@ button.danger {
   color: var(--danger);
 }
 button.danger:hover { background: var(--danger); color: #fff; }
+
+/* External partners: inline delete form sits next to the Edit link. */
+form.inline { display: inline; margin-left: 8px; }
+
+/* Inbound-coverage badges in the external-partners list. */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.badge.ok { color: var(--success); }
+.badge.warn { color: var(--warn); }

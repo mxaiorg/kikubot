@@ -70,6 +70,11 @@ func executeDownload(ctx context.Context, input json.RawMessage) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
+	// Many hosts (Wikimedia/upload.wikimedia.org, CDNs) reject requests with no
+	// or a non-browser User-Agent with HTTP 403. Present a browser UA so the
+	// common "download a public image/file" case doesn't force a bash/curl fallback.
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)

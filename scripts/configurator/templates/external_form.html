@@ -1,0 +1,33 @@
+{{define "external_form"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+{{with .Data}}
+<header class="page-header">
+  <h1>{{if .OriginalEmail}}Edit External Partner{{else}}Add External Partner{{end}}</h1>
+  <p class="lead">A peer running on another machine or domain, outside this deployment's control. Saved to the <code>external:</code> block of <code>configs/agents.yaml</code>. No tools, budgets, LLM or password apply — your agents never run this partner, they only delegate to it.</p>
+</header>
+<form class="card" method="post" action="/agents/external/save">
+  <input type="hidden" name="original_email" value="{{.OriginalEmail}}">
+  <div class="grid">
+    <label><span class="field-label">Partner name {{infoIcon "Display name shown to your agents in the {{coworkers}} roster."}}</span>
+      <input name="name" value="{{.Name}}" required>
+    </label>
+    <label><span class="field-label">Partner email {{infoIcon "The partner's address. Used as the recipient when your agents delegate, and registered so the same-domain send gate is relaxed for this exact address."}}</span>
+      <input name="email" value="{{.Email}}" type="email" required placeholder="partner@other-domain.com">
+    </label>
+    <label class="full"><span class="field-label">Role {{infoIcon "Brief tag-like role description."}}</span>
+      <input name="role" value="{{.Role}}" placeholder="Logistics, Billing" required>
+    </label>
+    <label class="full"><span class="field-label">Description {{infoIcon "A more detailed description of the partner's capabilities, so the model knows when to delegate to it."}}</span>
+      <input name="description" value="{{.Description}}" placeholder="Handles shipment scheduling and customs docs for EU orders." required>
+    </label>
+  </div>
+
+  <p class="hint">⚠️ This roster is <strong>outbound-only</strong>. To accept replies (or unsolicited requests) <em>from</em> this partner, add its address or domain to the relevant agents' <a href="/agents/list">whitelists</a> too — otherwise its inbound mail bounces at ACL and the task silently dead-ends.</p>
+
+  <div class="actions">
+    <button type="submit" class="primary">Save partner</button>
+    <a class="ghost" href="/agents/external">Cancel</a>
+  </div>
+</form>
+{{end}}
+{{end}}

@@ -66,6 +66,7 @@ func main() {
 	}
 	agentsCfg = cfg
 	config.Apply(cfg)
+	warnUncoveredExternals(cfg)
 	services.InitDataPaths(config.InContainer)
 	log.Printf("Agent, %s (%s), is alive!\n", config.AgentName, config.AgentEmail)
 
@@ -314,6 +315,12 @@ func process(parent context.Context) {
 		if snooze == nil {
 			break
 		}
+		// Watchdog entries own their own lifecycle (delete or reschedule) and
+		// must not go through AdvanceOrDeleteSnooze.
+		if snooze.Watchdog {
+			runWatchdog(parent, snooze)
+			continue
+		}
 		log.Println("snooze:", snooze.MessageId)
 		timeout := time.Duration(config.AgentTimeout) * time.Second
 		ctx, cancel := context.WithTimeout(parent, timeout)
@@ -327,6 +334,103 @@ func process(parent context.Context) {
 		if advErr := services.AdvanceOrDeleteSnooze(parent, snooze); advErr != nil {
 			log.Println("error advancing snooze:", advErr)
 		}
+	}
+}
+
+// waitingWatchdogMaxFires bounds how many times a stuck-task watchdog will
+// nudge a coordinator before giving up. Each nudge re-invokes the LLM, so this
+// caps the cost (and noise) of a permanently-dead delegate.
+const waitingWatchdogMaxFires = 2
+
+// runWatchdog handles a fired stuck-task watchdog (see
+// services.ArmWaitingWatchdog). It re-checks the thread and either stands down
+// (the awaited reply arrived and the task is no longer waiting), nudges the
+// coordinator to follow up or fall back to answering the requester, or — once
+// the nudge budget is exhausted — gives up: marks the thread errored and
+// notifies the immediate upstream so a delegation chain unwinds instead of
+// hanging. It fully owns the snooze entry lifecycle.
+func runWatchdog(parent context.Context, snooze *services.Snooze) {
+	mem, memErr := services.GetMemory(snooze.ThreadId)
+	if memErr != nil && !errors.Is(memErr, services.ErrMemoryNotFound) {
+		log.Printf("watchdog: error reading memory for %s: %s — rescheduling", snooze.ThreadId, memErr)
+		rescheduleWatchdog(parent, snooze)
+		return
+	}
+	// Stand down: the reply arrived (or the task otherwise resolved).
+	if mem == nil || mem.Status != services.MemoryStatus_Waiting {
+		log.Printf("watchdog: thread %s no longer waiting — standing down", snooze.ThreadId)
+		if delErr := snooze.DeleteSnooze(); delErr != nil {
+			log.Printf("watchdog: error deleting stood-down entry: %s", delErr)
+		}
+		return
+	}
+
+	// Budget exhausted: give up and unwind.
+	if snooze.Fires >= waitingWatchdogMaxFires {
+		log.Printf("watchdog: thread %s still waiting after %d nudges — giving up", snooze.ThreadId, snooze.Fires)
+		notice := fmt.Sprintf(
+			"⚠️ Agent %s waited on a delegated sub-task for this thread and received no reply "+
+				"after %d follow-ups. Marking the task as failed so it does not hang indefinitely. "+
+				"Please review and resend if the work is still needed.\n",
+			config.AgentName, snooze.Fires,
+		)
+		if emails, e := services.GetEmails(parent, []string{snooze.MessageId}); e == nil && len(emails) > 0 {
+			if bErr := services.SendBounce(parent, emails[0], notice); bErr != nil {
+				log.Printf("watchdog: error sending give-up notice: %s", bErr)
+			}
+		}
+		if sErr := services.SetMemoryStatus(parent, services.MemoryStatus_Error, snooze.MessageId); sErr != nil {
+			log.Printf("watchdog: error marking thread errored: %s", sErr)
+		}
+		if delErr := snooze.DeleteSnooze(); delErr != nil {
+			log.Printf("watchdog: error deleting exhausted entry: %s", delErr)
+		}
+		return
+	}
+
+	// Nudge. Reschedule first (incremented, future deadline) so the entry
+	// survives this turn and won't re-fire this cycle. If the coordinator
+	// re-arms waiting during the nudge, ArmWaitingWatchdog overwrites this with
+	// a fresh Fires=0 entry — progress resets the budget.
+	snooze.Fires++
+	rescheduleWatchdog(parent, snooze)
+
+	agent.ClearHistory()
+	agent.SetHistory(mem.History)
+	nudge := services.Snooze{
+		MessageId: snooze.MessageId,
+		Description: "You previously set this task to 'waiting' and are still waiting on a coworker who " +
+			"has not replied. Do NOT simply wait again. Either (a) send a brief follow-up to the coworker " +
+			"you delegated to, or (b) if you already have enough to proceed, reply to the original requester " +
+			"now with the best result you have (noting any missing piece) and mark the task complete. Do not " +
+			"re-delegate the whole task from scratch.",
+	}
+	timeout := time.Duration(config.AgentTimeout) * time.Second
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	hErr := agent.HandleSnooze(ctx, nudge, config.MaxTurns)
+	cancel()
+	if hErr != nil {
+		log.Printf("watchdog: error nudging coordinator for %s: %s", snooze.ThreadId, hErr)
+	}
+	// Persist whatever the nudge produced (mirrors the inbound-email path).
+	if sErr := services.SaveMemoryHistory(parent, agents.StripAttachmentBlobs(agent.History()), snooze.MessageId); sErr != nil {
+		log.Printf("watchdog: error saving history for %s: %s", snooze.ThreadId, sErr)
+	}
+	// If the task resolved during the nudge (and wasn't re-armed as waiting),
+	// drop the rescheduled entry so it doesn't wake again needlessly.
+	if m2, _ := services.GetMemory(snooze.ThreadId); m2 == nil || m2.Status != services.MemoryStatus_Waiting {
+		if delErr := snooze.DeleteSnooze(); delErr != nil {
+			log.Printf("watchdog: error clearing resolved entry: %s", delErr)
+		}
+	}
+}
+
+// rescheduleWatchdog pushes a watchdog's next firing to now + the configured
+// deadline and persists it (preserving Fires/Watchdog).
+func rescheduleWatchdog(parent context.Context, snooze *services.Snooze) {
+	snooze.UnSnooze = time.Now().Add(time.Duration(config.WaitingWatchdogMinutes) * time.Minute)
+	if err := snooze.SaveSnooze(parent); err != nil {
+		log.Printf("watchdog: error rescheduling %s: %s", snooze.ThreadId, err)
 	}
 }
 
@@ -543,7 +647,7 @@ func initAgent() {
 
 	var coworkerClause string
 	if cfg != nil {
-		coworkerClause = formatCoworkers(cfg.Coworkers(config.AgentEmail))
+		coworkerClause = formatCoworkers(cfg.Peers(config.AgentEmail))
 	}
 
 	var system string
@@ -767,16 +871,68 @@ func agentsConfigPath() string {
 	return filepath.Join(filepath.Dir(srcFile), "..", "..", "configs", "agents.yaml")
 }
 
-func formatCoworkers(coworkers []config.AgentDef) string {
-	if len(coworkers) == 0 {
+// warnUncoveredExternals logs a startup warning for each `external:` peer
+// whose address (or domain) is not covered by this agent's whitelist. The
+// roster is outbound-only: it lets this agent SEND to a partner, but the
+// partner's REPLY is still gated by AccessControl. In whitelist mode an
+// uncovered external can be delegated to, yet its reply bounces at the ACL —
+// which routes through handleAutoReply (so no loop), but the task silently
+// dead-ends. Only meaningful in whitelist mode; an empty whitelist means
+// inbound isn't whitelist-gated, so there's nothing to warn about.
+func warnUncoveredExternals(cfg *config.AgentsConfig) {
+	if cfg == nil || len(config.Whitelist) == 0 {
+		return
+	}
+	covers := func(email string) bool {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" {
+			return true // nothing to check
+		}
+		domain := ""
+		if at := strings.LastIndex(email, "@"); at >= 0 {
+			domain = email[at+1:]
+		}
+		for _, w := range config.Whitelist {
+			w = strings.ToLower(strings.TrimSpace(w))
+			if strings.Contains(w, "@") {
+				if w == email {
+					return true
+				}
+			} else if w != "" && w == domain {
+				return true
+			}
+		}
+		return false
+	}
+	for _, e := range cfg.External {
+		if e.Email == "" {
+			continue
+		}
+		if !covers(e.Email) {
+			log.Printf("warning: external peer %s is reachable (under `external:`) but not "+
+				"covered by this agent's whitelist — its replies will bounce at ACL. "+
+				"Add %q (or its domain) to %s's whitelist for two-way collaboration.",
+				e.Email, e.Email, config.AgentEmail)
+		}
+	}
+}
+
+func formatCoworkers(peers []config.PromptPeer) string {
+	if len(peers) == 0 {
 		return ""
 	}
-	coworkerJson, err := json.MarshalIndent(coworkers, " ", "   ")
+	coworkerJson, err := json.MarshalIndent(peers, " ", "   ")
 	if err != nil {
 		log.Fatal(err)
 	}
-	return fmt.Sprintf("Your coworkers are:\n\n%s\n\n%s",
-		coworkerJson,
-		"Collaborate with your coworkers using the message_tool tool.",
-	)
+	guidance := "Collaborate with your coworkers using the message_tool tool."
+	for _, p := range peers {
+		if p.Scope == "external" {
+			guidance += " Peers marked \"scope\": \"external\" run on other machines or domains: " +
+				"reach them the same way via message_tool, but expect higher latency, " +
+				"unknown capabilities, and no shared memory with them."
+			break
+		}
+	}
+	return fmt.Sprintf("Your coworkers are:\n\n%s\n\n%s", coworkerJson, guidance)
 }

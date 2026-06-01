@@ -75,6 +75,11 @@ func main() {
 	mux.HandleFunc("/agents/new", s.handleAgentNew)
 	mux.HandleFunc("/agents/edit", s.handleAgentEdit)
 	mux.HandleFunc("/agents/save", s.handleAgentSave)
+	mux.HandleFunc("/agents/external", s.handleExternalList)
+	mux.HandleFunc("/agents/external/new", s.handleExternalNew)
+	mux.HandleFunc("/agents/external/edit", s.handleExternalEdit)
+	mux.HandleFunc("/agents/external/save", s.handleExternalSave)
+	mux.HandleFunc("/agents/external/delete", s.handleExternalDelete)
 	mux.HandleFunc("/email-service", s.handleEmailService)
 	mux.HandleFunc("/email-service/cert", s.handleEmailServiceCert)
 	mux.HandleFunc("/knowledge", s.handleKnowledge)
@@ -122,6 +127,8 @@ func buildTemplates() (map[string]*template.Template, error) {
 		"defaults":      {"templates/layout.html", "templates/defaults.html", "templates/knowledge.html"},
 		"agent_form":    {"templates/layout.html", "templates/agent_form.html", "templates/knowledge.html"},
 		"agents_list":   {"templates/layout.html", "templates/agents_list.html"},
+		"external_list": {"templates/layout.html", "templates/external_list.html"},
+		"external_form": {"templates/layout.html", "templates/external_form.html"},
 		"email_service": {"templates/layout.html", "templates/email_service.html"},
 		// Standalone partial for HTMX save/delete responses.
 		"knowledge_editor": {"templates/knowledge.html"},

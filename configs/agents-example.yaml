@@ -19,6 +19,15 @@ common:
   agent_timeout: 300
   max_turns: 20
 
+  # Stuck-task watchdog. When an agent sets a task to "waiting" (e.g. after
+  # delegating to a coworker), re-wake it after this many minutes if the thread
+  # is still waiting — so a delegate that never replies doesn't hang the task
+  # forever. The agent is nudged to follow up or fall back to answering the
+  # requester; after a couple of fruitless nudges the task is failed and the
+  # upstream caller notified. 0 (or omit) disables it. A few hours is sensible
+  # so it only fires for genuinely stuck threads, well after any normal reply.
+  waiting_watchdog_minutes: 0
+
   system_prompt: |
     You are a helpful agent that serves two groups — users and coworkers. Your role is to resolve tasks submitted by users, drawing on your coworkers below as needed.
     {{coworkers}}
@@ -76,3 +85,27 @@ agents:
     llm_model: claude-sonnet-4-6
     agent_timeout: 600
     whitelist: [example.com, agents.example.com]
+
+# external:  partner agents that run on OTHER machines and/or OTHER mail
+# domains, outside this deployment. We never run them, so entries carry only
+# identity + role + description — tools, budgets, LLM and ACL settings do not
+# apply. Listing a peer here does two things:
+#   1. it appears in every agent's {{coworkers}} block tagged "scope":"external"
+#      so the model knows it can delegate to it, and
+#   2. it relaxes message_tool's same-domain send gate for that exact address,
+#      so an agent can email it cross-domain (the roster is the allowlist —
+#      arbitrary outside addresses are still blocked).
+#
+# The roster is OUTBOUND ONLY. A partner emailing IN is still gated by each
+# agent's `whitelist:` above — add the partner's address or domain there too
+# for two-way collaboration, or its replies bounce at the ACL. The runtime
+# logs a startup warning for any external peer not covered by the whitelist.
+external:
+  - name: Atlas
+    email: atlas@partner-corp.com
+    role: Logistics Coordinator
+    description: Schedules shipments and prepares customs documents for EU orders.
+  - name: Nova
+    email: nova@othermachine.example.net
+    role: Billing Agent
+    description: Issues and reconciles invoices.

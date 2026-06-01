@@ -24,7 +24,7 @@ import (
 // AgentDef is one entry under `agents:`. All fields except Name/Email/Role/
 // Description/Tools are optional overrides of CommonConfig.
 //
-// JSON tags exist because Coworkers() is serialised into the system prompt
+// JSON tags exist because Peers() is serialised into the system prompt
 // at the {{coworkers}} template marker — the LLM only sees the identity-and-
 // description fields, never overrides or secrets.
 type AgentDef struct {
@@ -35,25 +35,55 @@ type AgentDef struct {
 	Tools       []string `yaml:"tools,flow,omitempty" json:"-"`
 
 	// Per-agent overrides. A nil/zero value means "inherit from common".
-	LLMProvider         string   `yaml:"llm_provider,omitempty" json:"-"`
-	LLMModel            string   `yaml:"llm_model,omitempty" json:"-"`
-	LLMOpenRouterBackup []string `yaml:"llm_openrouter_backup,flow,omitempty" json:"-"`
-	SystemPrompt        string   `yaml:"system_prompt,omitempty" json:"-"`
-	Whitelist           []string `yaml:"whitelist,flow,omitempty" json:"-"`
-	Blacklist           []string `yaml:"blacklist,flow,omitempty" json:"-"`
-	MaxHistoryChars     *int     `yaml:"max_history_chars,omitempty" json:"-"`
-	MaxTokens           *int     `yaml:"max_tokens,omitempty" json:"-"`
-	MaxTurns            *int     `yaml:"max_turns,omitempty" json:"-"`
-	MaxToolResultChars  *int     `yaml:"max_tool_result_chars,omitempty" json:"-"`
-	MaxEmailRetries     *int     `yaml:"max_email_retries,omitempty" json:"-"`
-	MaxMessageBodyChars *int     `yaml:"max_message_body_chars,omitempty" json:"-"`
-	AgentTimeout        *int     `yaml:"agent_timeout,omitempty" json:"-"`
+	LLMProvider            string   `yaml:"llm_provider,omitempty" json:"-"`
+	LLMModel               string   `yaml:"llm_model,omitempty" json:"-"`
+	LLMOpenRouterBackup    []string `yaml:"llm_openrouter_backup,flow,omitempty" json:"-"`
+	SystemPrompt           string   `yaml:"system_prompt,omitempty" json:"-"`
+	Whitelist              []string `yaml:"whitelist,flow,omitempty" json:"-"`
+	Blacklist              []string `yaml:"blacklist,flow,omitempty" json:"-"`
+	MaxHistoryChars        *int     `yaml:"max_history_chars,omitempty" json:"-"`
+	MaxTokens              *int     `yaml:"max_tokens,omitempty" json:"-"`
+	MaxTurns               *int     `yaml:"max_turns,omitempty" json:"-"`
+	MaxToolResultChars     *int     `yaml:"max_tool_result_chars,omitempty" json:"-"`
+	MaxEmailRetries        *int     `yaml:"max_email_retries,omitempty" json:"-"`
+	MaxMessageBodyChars    *int     `yaml:"max_message_body_chars,omitempty" json:"-"`
+	AgentTimeout           *int     `yaml:"agent_timeout,omitempty" json:"-"`
+	WaitingWatchdogMinutes *int     `yaml:"waiting_watchdog_minutes,omitempty" json:"-"`
 
 	// Mail server overrides — rarely needed, but useful when one agent
 	// uses a different mailbox host than the rest of the roster.
 	EmailServer      string `yaml:"email_server,omitempty" json:"-"`
 	SmtpServer       string `yaml:"smtp_server,omitempty" json:"-"`
 	EmailInsecureTLS *bool  `yaml:"email_insecure_tls,omitempty" json:"-"`
+}
+
+// ExternalAgent is one entry under `external:` — a peer that runs on another
+// machine and/or another mail domain, outside this deployment's control. We
+// never run these agents, so they carry only identity-and-description fields:
+// tools, budgets, LLM config and ACL overrides do not apply.
+//
+// The roster grants this deployment's agents the ability to *reach* an
+// external peer via message_tool (it relaxes the same-domain send gate and
+// registers the address in AgentEmails). It does NOT grant the external peer
+// inbound access: a partner emailing in is still gated by each agent's
+// whitelist, which must list the address or its domain explicitly.
+type ExternalAgent struct {
+	Name        string `yaml:"name" json:"name,omitempty"`
+	Email       string `yaml:"email" json:"email,omitempty"`
+	Role        string `yaml:"role" json:"role,omitempty"`
+	Description string `yaml:"description" json:"description,omitempty"`
+}
+
+// PromptPeer is the shape rendered into the {{coworkers}} block of the system
+// prompt. In-roster coworkers leave Scope empty; external partners set
+// Scope="external" so the model knows the peer is off-box (possibly slower,
+// capabilities unknown, no shared memory).
+type PromptPeer struct {
+	Name        string `json:"name,omitempty"`
+	Email       string `json:"email,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Description string `json:"description,omitempty"`
+	Scope       string `json:"scope,omitempty"`
 }
 
 // CommonConfig holds defaults shared by every agent. Any field can be
@@ -69,14 +99,16 @@ type CommonConfig struct {
 	MaxEmailRetries         int    `yaml:"max_email_retries,omitempty"`
 	MaxMessageBodyChars     int    `yaml:"max_message_body_chars,omitempty"`
 	AgentTimeout            int    `yaml:"agent_timeout,omitempty"`
+	WaitingWatchdogMinutes  int    `yaml:"waiting_watchdog_minutes,omitempty"`
 	SystemPrompt            string `yaml:"system_prompt,omitempty"`
 	CoordinatorSystemPrompt string `yaml:"coordinator_system_prompt,omitempty"`
 }
 
 // AgentsConfig is the deserialised contents of configs/agents.yaml.
 type AgentsConfig struct {
-	Common CommonConfig `yaml:"common"`
-	Agents []AgentDef   `yaml:"agents"`
+	Common   CommonConfig    `yaml:"common"`
+	Agents   []AgentDef      `yaml:"agents"`
+	External []ExternalAgent `yaml:"external,omitempty"`
 }
 
 // Load reads and parses an agents YAML file. Returns (nil, nil) when the
@@ -107,23 +139,38 @@ func (c *AgentsConfig) FindAgent(email string) *AgentDef {
 	return nil
 }
 
-// Coworkers returns all agents except the one matching selfEmail. The
-// returned slice is JSON-marshalled into the {{coworkers}} block of the
-// system prompt, so it must not include secrets or overrides.
-func (c *AgentsConfig) Coworkers(selfEmail string) []AgentDef {
+// Peers returns every peer this agent may collaborate with — in-roster
+// coworkers (everyone under `agents:` except self) followed by external
+// partners (everyone under `external:`). The result is JSON-marshalled into
+// the {{coworkers}} block of the system prompt, so it carries only identity +
+// role + description; overrides and secrets are never included. External
+// peers are tagged Scope="external" so the model can distinguish them.
+func (c *AgentsConfig) Peers(selfEmail string) []PromptPeer {
 	selfEmail = strings.ToLower(selfEmail)
-	filtered := make([]AgentDef, 0, len(c.Agents))
+	peers := make([]PromptPeer, 0, len(c.Agents)+len(c.External))
 	for _, a := range c.Agents {
 		if strings.ToLower(a.Email) == selfEmail {
 			continue
 		}
 		// Strip overrides — coworkers only see identity + role + description.
-		filtered = append(filtered, AgentDef{
+		peers = append(peers, PromptPeer{
 			Name:        a.Name,
 			Email:       a.Email,
 			Role:        a.Role,
 			Description: a.Description,
 		})
 	}
-	return filtered
+	for _, e := range c.External {
+		if strings.ToLower(e.Email) == selfEmail {
+			continue
+		}
+		peers = append(peers, PromptPeer{
+			Name:        e.Name,
+			Email:       e.Email,
+			Role:        e.Role,
+			Description: e.Description,
+			Scope:       "external",
+		})
+	}
+	return peers
 }

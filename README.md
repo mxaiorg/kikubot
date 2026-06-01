@@ -39,6 +39,8 @@ This project is based on the research of mxHERO Labs. See our [blog post](https:
 
 ## Architecture
 
+For a developer-oriented visual map of the runtime, configuration, memory, tools, and integrations, see [docs/architecture.md](docs/architecture.md).
+
 ```
    ┌────────────┐       ┌──────────────────┐
    │   Users    │──┐    │    Coordinator   │ ◀──┐

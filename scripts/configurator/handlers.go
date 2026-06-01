@@ -214,6 +214,102 @@ func (s *server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "agents_list", pageData{Active: "list", Data: rows})
 }
 
+// ---- External Partners ----
+
+func (s *server) handleExternalList(w http.ResponseWriter, r *http.Request) {
+	rows, err := listExternalAgents(s.root)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "external_list", pageData{Active: "external", Data: rows})
+}
+
+func (s *server) handleExternalNew(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "external_form", pageData{Active: "external-new", Data: &externalForm{}})
+}
+
+func (s *server) handleExternalEdit(w http.ResponseWriter, r *http.Request) {
+	email := resolveExternalEmail(s.root, r.URL.Query().Get("email"))
+	if email == "" {
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	e, err := loadExternalForm(s.root, email)
+	if err != nil {
+		setFlash(w, "error", "Load failed: "+err.Error())
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	s.render(w, r, "external_form", pageData{Active: "external", Data: e})
+}
+
+func (s *server) handleExternalSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	_ = r.ParseForm()
+	e := &externalForm{
+		OriginalEmail: r.FormValue("original_email"),
+		Name:          r.FormValue("name"),
+		Email:         r.FormValue("email"),
+		Role:          r.FormValue("role"),
+		Description:   r.FormValue("description"),
+	}
+	if _, err := e.save(s.root); err != nil {
+		s.render(w, r, "external_form", pageData{Active: "external", Data: e, Flash: err.Error(), FlashKind: "error"})
+		return
+	}
+	setFlash(w, "success", "Saved external partner "+e.Name)
+	http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+}
+
+func (s *server) handleExternalDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	_ = r.ParseForm()
+	email := strings.TrimSpace(r.FormValue("email"))
+	rr, err := loadRoster(s.root)
+	if err != nil {
+		setFlash(w, "error", "Delete failed: "+err.Error())
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	if findExternalIndex(rr, email) < 0 {
+		setFlash(w, "error", "No external partner with email "+email)
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	removeExternal(rr, email)
+	if err := saveRoster(s.root, rr); err != nil {
+		setFlash(w, "error", "Delete failed: "+err.Error())
+		http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+		return
+	}
+	setFlash(w, "success", "Deleted external partner "+email)
+	http.Redirect(w, r, "/agents/external", http.StatusSeeOther)
+}
+
+// resolveExternalEmail accepts a full email (the only id used for external
+// partners) and returns it if present in the `external:` roster, else "".
+func resolveExternalEmail(root, email string) string {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return ""
+	}
+	r, err := loadRoster(root)
+	if err != nil {
+		return ""
+	}
+	if findExternalIndex(r, email) >= 0 {
+		return email
+	}
+	return ""
+}
+
 // ---- Email Service ----
 
 // emailServiceView is the render-time view that combines the postfix config

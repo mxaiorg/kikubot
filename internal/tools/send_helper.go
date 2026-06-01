@@ -9,6 +9,8 @@ import (
 	"kikubot/internal/services"
 	"log"
 	netmail "net/mail"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -50,40 +52,49 @@ func sendEmailInternal(ctx context.Context, input json.RawMessage) (string, erro
 	}
 	agentEmailDomain := strings.ToLower(splitAgentEmail[1])
 
-	// 'To' email must be the same domain as the agent's email
+	// 'To' must be well-formed.
 	splitTo := strings.Split(params.To, "@")
 	if len(splitTo) != 2 {
 		return "", fmt.Errorf("invalid email format: %s", params.To)
 	}
 	toEmailDomain := strings.ToLower(splitTo[1])
 
-	if agentEmailDomain != toEmailDomain {
-		return "", fmt.Errorf("this tool can only send internal messages to the same email domain as the agent (%s)",
-			agentEmailDomain)
+	toAddr := bareAddressFromEmail(params.To)
+	if toAddr == "" {
+		toAddr = strings.ToLower(strings.TrimSpace(params.To))
 	}
 
-	// Verify To is a known coworker. The domain check above catches
-	// wrong-domain addresses (e.g. "mail.agents.mxhero.com") but not
-	// local-part typos or hallucinated agents (e.g. "gama@agents.mxhero.com"
-	// when "gamma" was intended, or "echo@..." when no such agent exists).
-	// Looking To up in global.AgentEmails closes that gap. Skipped when
-	// AgentEmails hasn't been populated (no agents.yaml) — we fall back
-	// to trusting the domain check alone in that case.
-	if len(config.AgentEmails) > 0 {
-		toAddr := bareAddressFromEmail(params.To)
-		if toAddr == "" {
-			toAddr = strings.ToLower(strings.TrimSpace(params.To))
-		}
-		if !config.AgentEmails[toAddr] {
+	// Recipient gate. The send is allowed when the recipient is either
+	// same-domain (a sibling agent on this deployment) or an explicitly
+	// registered peer in AgentEmails (which now includes `external:`
+	// partners on other machines/domains). Registering an external peer in
+	// agents.yaml is what unlocks cross-domain delivery — this stays an
+	// allowlist, so the model still cannot email an arbitrary outside
+	// address (anti-exfiltration). When AgentEmails is unpopulated (no
+	// agents.yaml) we fall back to the same-domain rule alone.
+	knownPeer := len(config.AgentEmails) > 0 && config.AgentEmails[toAddr]
+	if !knownPeer {
+		if len(config.AgentEmails) > 0 {
+			// Roster is loaded but this address isn't in it — catches
+			// local-part typos, hallucinated agents, and unregistered
+			// cross-domain addresses with one actionable error.
 			peers := knownPeerEmails()
 			return "", fmt.Errorf(
-				"unknown coworker %q — known coworkers: %s. Check spelling (local part) and retry",
+				"unknown coworker %q — known coworkers: %s. To reach a peer on "+
+					"another domain, add it under `external:` in agents.yaml. "+
+					"Otherwise check spelling (local part) and retry",
 				params.To, strings.Join(peers, ", "),
 			)
 		}
+		// No roster: trust the same-domain rule alone.
+		if agentEmailDomain != toEmailDomain {
+			return "", fmt.Errorf("this tool can only send internal messages to the same email domain as the agent (%s)",
+				agentEmailDomain)
+		}
 	}
 
-	// Filter Cc addresses to only include those with the same domain as the agent
+	// Filter Cc addresses to those allowed under the same gate as To:
+	// same-domain siblings, or registered peers (incl. external partners).
 	if params.Cc != "" {
 		ccAddresses := commaSplitReg.Split(params.Cc, -1)
 		var validCc []string
@@ -97,7 +108,12 @@ func sendEmailInternal(ctx context.Context, input json.RawMessage) (string, erro
 				continue
 			}
 			ccDomain := strings.ToLower(splitCc[1])
-			if ccDomain == agentEmailDomain {
+			ccAddr := bareAddressFromEmail(cc)
+			if ccAddr == "" {
+				ccAddr = strings.ToLower(cc)
+			}
+			ccKnownPeer := len(config.AgentEmails) > 0 && config.AgentEmails[ccAddr]
+			if ccDomain == agentEmailDomain || ccKnownPeer {
 				validCc = append(validCc, cc)
 			}
 		}
@@ -625,19 +641,44 @@ func findHumanInThread(ctx context.Context, replyEmail *services.Email) (string,
 // attachmentParam represents an attachment provided by the LLM in a tool call.
 type attachmentParam struct {
 	Name     string `json:"name"`
-	Content  string `json:"content"`
+	Path     string `json:"path"`     // local file path (from download_file / save_attachment)
+	Content  string `json:"content"`  // inline content, used only when Path is empty
 	Encoding string `json:"encoding"` // "base64" or "text"
 }
 
 func (ap attachmentParam) toAttachment() (services.Attachment, error) {
+	// Preferred path: the bytes already live on disk (download_file,
+	// save_attachment, or anything written via bash_exec). Read them here so
+	// the model never has to hand-carry a base64 blob through its tool-call
+	// arguments — that path truncates large files and produces invalid base64.
+	if p := strings.TrimSpace(ap.Path); p != "" {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return services.Attachment{}, fmt.Errorf(
+				"read attachment from path %q: %w (the file must already exist "+
+					"on disk — download it with download_file or materialise an "+
+					"inbound attachment with save_attachment first)",
+				p, err,
+			)
+		}
+		if len(data) == 0 {
+			return services.Attachment{}, fmt.Errorf("attachment file %q is empty (0 bytes)", p)
+		}
+		name := strings.TrimSpace(ap.Name)
+		if name == "" {
+			name = filepath.Base(p)
+		}
+		return services.Attachment{Name: name, Data: data}, nil
+	}
+
 	if strings.TrimSpace(ap.Content) == "" {
 		return services.Attachment{}, fmt.Errorf(
-			"attachment %q has empty content — you cannot reproduce binary "+
-				"content you have not seen. To include a file from an inbound "+
-				"email, use `X-Forwarded` with that email's Message-Id; the "+
-				"system will re-fetch and re-attach the original bytes. The "+
-				"`attachments` field is only for files you authored in this "+
-				"turn (reports, exports, generated text)",
+			"attachment %q has neither `path` nor `content` — for a file you "+
+				"downloaded or saved to disk, pass its local `path`. To include "+
+				"a file from an inbound email, use `X-Forwarded` with that "+
+				"email's Message-Id; the system will re-fetch and re-attach the "+
+				"original bytes. The `content` field is only for small files you "+
+				"authored inline in this turn (short reports, exports, text)",
 			ap.Name,
 		)
 	}

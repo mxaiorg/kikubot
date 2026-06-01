@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron"
@@ -24,6 +25,16 @@ type Snooze struct {
 	Crontab     string    `json:"crontab,omitempty"`
 	UnSnooze    time.Time `json:"unSnooze,omitempty"`
 	Timezone    string    `json:"timezone,omitempty"` // IANA timezone or fixed offset from user's email
+	// Watchdog marks an entry as a coordinator stuck-task watchdog rather than
+	// a user/scheduled snooze. Watchdog entries are armed automatically when an
+	// agent sets status=waiting and fire only if the thread is still waiting at
+	// the deadline (see ArmWaitingWatchdog and the watchdog branch in the poll
+	// loop). They are handled separately from ordinary snoozes.
+	Watchdog bool `json:"watchdog,omitempty"`
+	// Fires counts how many times this watchdog has already nudged the
+	// coordinator. Capped in the poll loop so a permanently-dead delegate
+	// can't trigger an unbounded nudge loop.
+	Fires int `json:"fires,omitempty"`
 }
 
 // LoadTimezone loads a *time.Location from an IANA name (e.g. "America/New_York")
@@ -67,6 +78,41 @@ func TimezoneFromTime(t time.Time) string {
 // It is an array of Snooze objects.
 // Overridden by InitDataPaths when running in a container.
 var snoozeFile = "snooze.json"
+
+// ArmWaitingWatchdog schedules (or refreshes) a watchdog for a thread that has
+// just entered the "waiting" state, so a coordinator blocked on a delegate that
+// never replies is re-woken at the deadline instead of hanging forever.
+//
+// messageId is the inbound message the agent was processing when it set
+// waiting (the trusted SourceEmail message-id); the watchdog replays it.
+// threadId is that email's thread root (resolved by the caller from the same
+// trusted source, so no IMAP round-trip is needed here). The deadline is
+// now + minutes.
+//
+// It deliberately does NOT clobber a pre-existing *non-watchdog* snooze on the
+// same thread (a real scheduled/recurring task) — that snooze will re-trigger
+// processing on its own, so the watchdog stands down. Refreshing an existing
+// watchdog resets its Fires counter to zero, because reaching this point means
+// the agent just made progress (it delivered a message this turn).
+func ArmWaitingWatchdog(ctx context.Context, messageId, threadId string, minutes int) error {
+	if minutes <= 0 || strings.TrimSpace(messageId) == "" || strings.TrimSpace(threadId) == "" {
+		return nil
+	}
+	if existing, ferr := FindSnoozeByThread(threadId); ferr == nil && existing != nil && !existing.Watchdog {
+		// A genuine scheduled snooze owns this thread; leave it alone.
+		return nil
+	}
+	s := &Snooze{
+		ThreadId:    threadId,
+		MessageId:   messageId,
+		Once:        true,
+		Watchdog:    true,
+		Fires:       0,
+		UnSnooze:    time.Now().Add(time.Duration(minutes) * time.Minute),
+		Description: "watchdog: still awaiting a reply on this delegated task",
+	}
+	return s.SaveSnooze(ctx)
+}
 
 // FindSnoozeByThread returns the snooze entry for a given thread root ID,
 // or nil if none exists.

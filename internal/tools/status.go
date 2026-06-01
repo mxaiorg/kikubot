@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"kikubot/internal/config"
 	"kikubot/internal/services"
 	"log"
 )
@@ -84,6 +85,23 @@ func setTaskStatus(ctx context.Context, input json.RawMessage) (string, error) {
 	if err != nil {
 		log.Printf("error setting memory status: %s", err)
 		return "", err
+	}
+
+	// Arm the stuck-task watchdog when entering "waiting". A coordinator that
+	// delegates and waits has no other deadline — if the delegate never
+	// replies, the thread hangs forever. The watchdog re-wakes this agent after the configured
+	// deadline if the thread is still waiting. Use the trusted inbound message
+	// from ctx, never LLM input, so the replay targets the real message. Gated
+	// on a real send this turn (DeliveryCount) so we don't arm a watchdog for a
+	// turn that never actually delivered anything.
+	if params.Status == string(services.MemoryStatus_Waiting) &&
+		config.WaitingWatchdogMinutes > 0 &&
+		services.DeliveryCount(ctx) > 0 {
+		if src := services.SourceEmail(ctx); src != nil && src.MessageId != "" {
+			if armErr := services.ArmWaitingWatchdog(ctx, src.MessageId, src.GetThreadRoot(), config.WaitingWatchdogMinutes); armErr != nil {
+				log.Printf("warning: could not arm waiting watchdog: %s", armErr)
+			}
+		}
 	}
 
 	return "Status Updated", nil

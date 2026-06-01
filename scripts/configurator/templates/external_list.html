@@ -1,0 +1,43 @@
+{{define "external_list"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+<header class="page-header">
+  <h1>External Partners</h1>
+  <p class="lead">Agents on other machines or domains, listed under <code>external:</code> in <code>configs/agents.yaml</code>. They are identity-only — your agents can <strong>delegate to</strong> them via <code>message_tool</code>, but a partner emailing in is still gated by each agent's whitelist.</p>
+</header>
+<div class="card">
+  {{if .Data}}
+  <table class="table">
+    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Description</th><th>Inbound</th><th></th></tr></thead>
+    <tbody>
+    {{range .Data}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td><code>{{.Email}}</code></td>
+        <td>{{.Role}}</td>
+        <td>{{.Description}}</td>
+        <td>
+          {{if .Uncovered}}
+            <span class="badge warn" title="These whitelist-mode agents do not admit this partner, so its replies will bounce: {{join .Uncovered ", "}}">⚠️ not whitelisted by {{len .Uncovered}}</span>
+          {{else}}
+            <span class="badge ok">✓ covered</span>
+          {{end}}
+        </td>
+        <td>
+          <a class="primary" href="/agents/external/edit?email={{.Email}}">Edit</a>
+          <form method="post" action="/agents/external/delete" class="inline" onsubmit="return confirm('Remove external partner {{.Email}}?');">
+            <input type="hidden" name="email" value="{{.Email}}">
+            <button type="submit" class="ghost danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <p class="empty">No external partners configured. <a href="/agents/external/new">Add one</a>.</p>
+  {{end}}
+</div>
+<div class="actions">
+  <a class="primary" href="/agents/external/new">Add External Partner</a>
+</div>
+{{end}}

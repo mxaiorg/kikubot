@@ -30,14 +30,18 @@ var (
 	LlmOpenRouterBackup []string // ordered fallback models for OpenRouter
 	SysPrompt           string
 	AgentTimeout        int // in seconds
-	MaxTurns            int // max agentic loop turns per inbound message (default 20)
-	MaxTokens           int
-	MaxHistoryChars     int // max total chars in serialized conversation history (0 = unlimited)
-	MaxToolResultChars  int // max chars per individual tool result (0 = unlimited)
-	MaxEmailRetries     int // max times an inbound email can be left unseen before we give up and bounce
-	MaxMessageBodyChars int // soft cap on inline email body length; bulk content must use attachments (0 = unlimited)
-	InboxFolder         string
-	SentFolder          string
+	// WaitingWatchdogMinutes is the deadline, in minutes, after which a thread
+	// still in the "waiting" state re-wakes its coordinator (see
+	// services.ArmWaitingWatchdog). 0 disables the watchdog.
+	WaitingWatchdogMinutes int
+	MaxTurns               int // max agentic loop turns per inbound message (default 20)
+	MaxTokens              int
+	MaxHistoryChars        int // max total chars in serialized conversation history (0 = unlimited)
+	MaxToolResultChars     int // max chars per individual tool result (0 = unlimited)
+	MaxEmailRetries        int // max times an inbound email can be left unseen before we give up and bounce
+	MaxMessageBodyChars    int // soft cap on inline email body length; bulk content must use attachments (0 = unlimited)
+	InboxFolder            string
+	SentFolder             string
 
 	// WebSiteUrl WordPressConfig
 	WebSiteUrl        string
@@ -168,6 +172,8 @@ func Apply(cfg *AgentsConfig) {
 	SysPrompt = pickStr(agentStr(agent, func(a *AgentDef) string { return a.SystemPrompt }), common.SystemPrompt)
 
 	AgentTimeout = pickInt(intPtr(agent, func(a *AgentDef) *int { return a.AgentTimeout }), common.AgentTimeout, 300)
+	// 0 = disabled (default). Opt-in per deployment via agents.yaml.
+	WaitingWatchdogMinutes = pickInt(intPtr(agent, func(a *AgentDef) *int { return a.WaitingWatchdogMinutes }), common.WaitingWatchdogMinutes, 0)
 	MaxTurns = pickInt(intPtr(agent, func(a *AgentDef) *int { return a.MaxTurns }), common.MaxTurns, 20)
 	MaxHistoryChars = pickInt(intPtr(agent, func(a *AgentDef) *int { return a.MaxHistoryChars }), common.MaxHistoryChars, 50000)
 	MaxEmailRetries = pickInt(intPtr(agent, func(a *AgentDef) *int { return a.MaxEmailRetries }), common.MaxEmailRetries, 3)
@@ -206,10 +212,18 @@ func Apply(cfg *AgentsConfig) {
 	WeatherApiKey = os.Getenv("WEATHERAPI_KEY")
 
 	if cfg != nil {
-		AgentEmails = make(map[string]bool, len(cfg.Agents))
+		AgentEmails = make(map[string]bool, len(cfg.Agents)+len(cfg.External))
 		for _, a := range cfg.Agents {
 			if a.Email != "" {
 				AgentEmails[strings.ToLower(a.Email)] = true
+			}
+		}
+		// External partners count as agents for both findAnchor (their
+		// replies are peer messages, not the human anchor) and the
+		// message_tool known-coworker check (so sends to them are allowed).
+		for _, e := range cfg.External {
+			if e.Email != "" {
+				AgentEmails[strings.ToLower(e.Email)] = true
 			}
 		}
 	} else {
