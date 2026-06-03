@@ -104,9 +104,9 @@ func regenerateDmsAccounts(root string) error {
 		sb.WriteByte('\n')
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return fsWriteError(dir, err)
 	}
-	return os.WriteFile(dmsAccountsPath(root), []byte(sb.String()), 0o600)
+	return fsWriteError(dmsAccountsPath(root), os.WriteFile(dmsAccountsPath(root), []byte(sb.String()), 0o600))
 }
 
 // parseDmsAccounts returns a lowercased-email → hash map. Missing file ⇒

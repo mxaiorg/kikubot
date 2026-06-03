@@ -141,7 +141,7 @@ func updateDmsCompose(root, hostname, domainname string) error {
 	if domainname != "" {
 		src = domainnameRE.ReplaceAllString(src, "${1}domainname: "+domainname)
 	}
-	return os.WriteFile(live, []byte(src), 0o644)
+	return fsWriteError(live, os.WriteFile(live, []byte(src), 0o644))
 }
 
 // sslCertStatus reports whether the two cert files exist in services/dms/certs/.

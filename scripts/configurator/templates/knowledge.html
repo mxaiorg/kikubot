@@ -1,6 +1,6 @@
 {{define "knowledge_editor"}}
 <div class="knowledge-editor" id="knowledge-editor">
-  {{if .Flash}}<div class="knowledge-flash {{.FlashKind}}">{{.Flash}}</div>{{end}}
+  {{if .Flash}}<div class="knowledge-flash {{.FlashKind}}"><span class="flash-msg">{{.Flash}}</span><button type="button" class="flash-close" aria-label="Dismiss">&times;</button></div>{{end}}
   <p class="hint">Markdown files in <code>{{.Dir}}/</code> are concatenated into the agent's system prompt in <strong>filename order</strong>. Use numeric prefixes (<code>01_</code>, <code>02_</code>, …) to control the order in which they are consumed — rename a file to re-order it.</p>
 
   {{if .Files}}

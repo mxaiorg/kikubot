@@ -115,7 +115,7 @@ func saveKnowledgeFile(root, scope, oldName, name, content string) error {
 	}
 	dir := knowledgeDir(root, scope)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return fsWriteError(dir, err)
 	}
 	// Normalise to LF and guarantee a single trailing newline.
 	content = strings.ReplaceAll(content, "\r\n", "\n")
@@ -131,7 +131,7 @@ func saveKnowledgeFile(root, scope, oldName, name, content string) error {
 		}
 	}
 	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
-		return err
+		return fsWriteError(target, err)
 	}
 	if oldName != "" && oldName != name {
 		// Rename: drop the old file after the new one is written.
@@ -148,11 +148,12 @@ func deleteKnowledgeFile(root, scope, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(knowledgeDir(root, scope) + string(os.PathSeparator) + name); err != nil {
+	target := knowledgeDir(root, scope) + string(os.PathSeparator) + name
+	if err := os.Remove(target); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fsWriteError(target, err)
 	}
 	return nil
 }

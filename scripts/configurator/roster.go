@@ -76,7 +76,7 @@ func removeAgent(r *roster, email string) {
 func saveRoster(root string, r *roster) error {
 	dir := filepath.Dir(rosterPath(root))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return fsWriteError(dir, err)
 	}
 	var buf strings.Builder
 	enc := yaml.NewEncoder(&strBuf{&buf})
@@ -87,7 +87,7 @@ func saveRoster(root string, r *roster) error {
 	if err := enc.Close(); err != nil {
 		return err
 	}
-	return os.WriteFile(rosterPath(root), []byte(buf.String()), 0o644)
+	return fsWriteError(rosterPath(root), os.WriteFile(rosterPath(root), []byte(buf.String()), 0o644))
 }
 
 // strBuf adapts *strings.Builder to io.Writer for yaml.NewEncoder.

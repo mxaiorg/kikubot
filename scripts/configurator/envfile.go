@@ -274,7 +274,7 @@ func (f *envFile) Render() string {
 }
 
 func (f *envFile) Save(path string) error {
-	return os.WriteFile(path, []byte(f.Render()), 0o644)
+	return fsWriteError(path, os.WriteFile(path, []byte(f.Render()), 0o644))
 }
 
 // Keys returns the set of declared (live or commented) keys, in declaration order.

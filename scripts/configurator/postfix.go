@@ -185,17 +185,18 @@ func (c *emailServiceConfig) Save(root string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
-	transport := c.renderTransport()
-	if err := os.WriteFile(filepath.Join(dir, "postfix-transport.cf"), []byte(transport), 0o644); err != nil {
-		return err
+	files := []struct {
+		name, content string
+	}{
+		{"postfix-transport.cf", c.renderTransport()},
+		{"postfix-sender-access.cf", c.renderSenderAccess()},
+		{"postfix-main.cf", c.renderMainCf()},
 	}
-	sender := c.renderSenderAccess()
-	if err := os.WriteFile(filepath.Join(dir, "postfix-sender-access.cf"), []byte(sender), 0o644); err != nil {
-		return err
-	}
-	main := c.renderMainCf()
-	if err := os.WriteFile(filepath.Join(dir, "postfix-main.cf"), []byte(main), 0o644); err != nil {
-		return err
+	for _, f := range files {
+		p := filepath.Join(dir, f.name)
+		if err := os.WriteFile(p, []byte(f.content), 0o644); err != nil {
+			return fsWriteError(p, err)
+		}
 	}
 	return nil
 }

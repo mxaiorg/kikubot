@@ -125,5 +125,5 @@ func regenerateCompose(root string) error {
 		b.WriteString("      - ./configs/knowledge:/app/knowledge:ro\n")
 	}
 
-	return os.WriteFile(composePath(root), []byte(b.String()), 0o644)
+	return fsWriteError(composePath(root), os.WriteFile(composePath(root), []byte(b.String()), 0o644))
 }

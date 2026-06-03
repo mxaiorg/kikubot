@@ -38,7 +38,7 @@ func loadSecrets(root string) *envFile {
 // saveSecrets writes the secrets file to configs/secrets.env.
 func saveSecrets(root string, f *envFile) error {
 	if err := os.MkdirAll(filepath.Dir(secretsPath(root)), 0o755); err != nil {
-		return err
+		return fsWriteError(filepath.Dir(secretsPath(root)), err)
 	}
 	return f.Save(secretsPath(root))
 }

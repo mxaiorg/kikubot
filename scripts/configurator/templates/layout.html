@@ -26,7 +26,10 @@
   </div>
 </aside>
 <main class="content">
-  <div id="flash" class="flash{{if .Flash}} show{{end}} {{.FlashKind}}">{{.Flash}}</div>
+  <div id="flash" class="flash{{if .Flash}} show{{end}} {{.FlashKind}}">
+    <span class="flash-msg">{{.Flash}}</span>
+    <button type="button" class="flash-close" aria-label="Dismiss">&times;</button>
+  </div>
   {{template "page" .}}
 </main>
 </body>
