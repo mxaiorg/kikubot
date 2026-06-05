@@ -12,10 +12,33 @@ One of the key benefits of the Kikubot framework is that it allows you to easily
 
 Although you can use most any email client that supports multiple email accounts like Microsoft Outlook, here we will use the free Thunderbird email client. Thunderbird is available for Windows, macOS, and Linux. You can download Thunderbird from the [Thunderbird website](https://www.thunderbird.net).
 
-### Configuring
+#### Thunderbird configured to observe the email traffic between several agents...
 
-The following instructions assume you are using the included DMS email service. If you are using a different email service, you may need to configure Thunderbird differently. For example, if you are using Gmail, you will need to enable IMAP access in your account settings.
+<img src="./assets/Thunderbird.png" alt="kikubot" width="600">
 
-Thunderbird supports multiple email accounts. To configura an email account do the following:
+### Configuring an email account
 
-*To be completed*
+The following instructions assume you are using the included DMS email service. If you are using a different email service or email client, you may need to configure differently. For example, if you are using Gmail, you will need to enable IMAP access in your account settings.
+
+Thunderbird supports multiple email accounts. To configure an email account do the following:
+
+### Client configuration screenshots
+
+#### IMAP
+
+* Server: hostname of the IMAP server (e.g., hostname of the DMS server)
+* Port: 993 (secure IMAP port)
+* Connection Security: SSL/TLS
+* Authentication: Normal password
+
+<img src="./assets/IMAP-Config.png" alt="kikubot" width="500">
+
+
+#### SMTP
+
+* Server: hostname of the SMTP server (e.g., hostname of the DMS server)
+* Port: 587 (secure SMTP port)
+* Connection Security: STARTTLS
+* Authentication: Normal password
+
+<img src="./assets/SMTP-Config.png" alt="kikubot" width="500">

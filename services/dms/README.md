@@ -8,6 +8,14 @@ If you do use this server, be sure to properly configure the email domain for de
 
 See the config directory for additional domain configuration.
 
+## Why create a separate agent domain?
+
+By isolating agent traffic to its own domain, it is easier to control inbound and outbound traffic of the agents. Furthermore, you can more easily observe and control agent activity by configuring an IMAP client with multiple agent accounts. For example, with the [Thunderbird](https://www.thunderbird.net/) client.
+
+More about observation and control of agent activity see this [README](../../README-Observability.md)
+
+
+
 ## Docker
 
 ```bash
