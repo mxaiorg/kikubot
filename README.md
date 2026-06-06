@@ -100,7 +100,7 @@ go run ./scripts/configurator  # serves on 127.0.0.1:50042
 
 <img src="assets/Configurator.png" alt="kikubot" width="800">
 
-See [scripts/configurator/README.md](scripts/configurator/README.md) for more details. There is also a [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
+See [scripts/configurator/README.md](scripts/configurator/README.md) for more details. There is also a, slightly outdated, [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
 
 ## AI Configuration
 _Use your coding agent_
