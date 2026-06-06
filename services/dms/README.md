@@ -14,9 +14,15 @@ By isolating agent traffic to its own domain, it is easier to control inbound an
 
 More about observation and control of agent activity see this [README](../../README-Observability.md)
 
+## Configurator Installation
 
+Go to the 'Email Service' page in the [Configurator](../../scripts/configurator/README.md) to configure the email domain.
 
-## Docker
+<img src="../../assets/Configurator-DMS.png" alt="kikubot" width="800">
+
+## Manual Installation
+
+### Docker
 
 ```bash
 cp docker-compose.yml.example docker-compose.yml
@@ -34,7 +40,21 @@ Edit the `docker-compose.yml` file to configure the email domain:
 docker compose up -d
 ```
 
-## Managing Agent Email Accounts
+## Testing
+
+Once you have the server running, you can test it by connecting to it with an IMAP client. One easy way is to create a generic user account in the server and use the Thunderbird client to connect to it.
+
+From below, add your user to the server:
+
+```bash
+docker exec -it dms bash
+# Create accounts (create your own email addresses and passwords)
+root@mele:/# setup email add user@agents.mxhero.com "pass"
+```
+
+When configuring your Thunderbird client, see details in [README-Observability.md](../../README-Observability.md#configuring-an-email-account)
+
+### Managing Agent Email Accounts
 
 If you're using the **Configurator** (`scripts/configurator`), account
 management is automatic: every time you save the Email Service page or
@@ -73,9 +93,9 @@ docker rm -f dms && docker compose up --force-recreate
 openssl s_client -connect mail.agents.example.com:993 -quiet
 ```
 
-## Using Self signed certificates
+### Using Self signed certificates
 
-To generate a self signed certificate,
+To manually generate a self signed certificate,
 
 ```bash
 cd services/dms
