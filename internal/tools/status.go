@@ -86,6 +86,9 @@ func setTaskStatus(ctx context.Context, input json.RawMessage) (string, error) {
 		log.Printf("error setting memory status: %s", err)
 		return "", err
 	}
+	if params.Status == string(services.MemoryStatus_Complete) {
+		fireTaskComplete(ctx)
+	}
 
 	// Arm the stuck-task watchdog when entering "waiting". A coordinator that
 	// delegates and waits has no other deadline — if the delegate never

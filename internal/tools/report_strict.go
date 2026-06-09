@@ -90,7 +90,22 @@ func sendReportStrictEmail(ctx context.Context, input json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
-	return sendEmail(ctx, locked)
+	var params sendMailMsg
+	if err := json.Unmarshal(locked, &params); err != nil {
+		return "", fmt.Errorf("invalid locked report input: %w", err)
+	}
+	result, err := sendEmail(ctx, locked)
+	if err != nil {
+		return "", err
+	}
+	fireReportSent(ctx, SentReport{
+		To:        params.To,
+		Cc:        params.Cc,
+		InReplyTo: params.InReplyTo,
+		Subject:   params.Subject,
+		Message:   params.Message,
+	})
+	return result, nil
 }
 
 // lockReportRecipient parses the tool input, resolves the authorised

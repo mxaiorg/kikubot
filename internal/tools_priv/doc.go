@@ -49,4 +49,26 @@
 //     configs/agents.yaml.
 //
 // The cmd/kikubot package blank-imports this package so the init() runs.
+//
+// # Hooking into public behaviour (instead of editing public files)
+//
+// Private code sometimes needs to react to public tool flows — run a
+// notification after a report is sent, do bookkeeping when a task completes.
+// Do NOT add company-specific calls to public files (report_strict.go,
+// status.go, …): every such edit becomes a perennial merge conflict against the
+// public repo. Instead, register against the extension seams declared in
+// internal/tools/hooks.go from an init() here. Each seam is a no-op when nothing
+// registers, so a checkout with no files under this package is unaffected.
+//
+// Available seams (see internal/tools/hooks.go):
+//
+//   - tools.RegisterReportSentHook(fn) — fn func(ctx, tools.SentReport):
+//     fired after a report is delivered.
+//   - tools.RegisterTaskCompleteHook(fn) — fn func(ctx):
+//     fired when a task is marked complete via set_task_status.
+//
+// When an integration point you need has no seam yet, add a Register* function
+// to internal/tools/hooks.go plus a single fire call at the relevant public
+// site — a small, generic change — rather than inlining the private logic. Keep
+// the implementation, its strings, and its tests in this package.
 package toolspriv
