@@ -25,7 +25,7 @@ import (
 //   - Exposes only the endpoints we actually use, keeping the model's
 //     visible tool surface small.
 //
-// One-time bootstrap: run cmd/xero-bootstrap to seed data/<agent>/xero/
+// One-time bootstrap: `go run scripts/xero-bootstrap/*.go` to seed data/<agent>/xero/
 // tokens.json before enabling the "xero_api" tool key in agents.yaml.
 
 func XeroAPI() []ToolDefinition {
