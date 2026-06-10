@@ -57,6 +57,36 @@ mxHERO Labs has deployed a Kikubot instance to a single machine. The instance is
 
 This small Kikubot demo illustrates how multiple agents can work together over email
 
+## Try it locally (zero-cost)
+
+Want to run your own Kikubot in under a minute, with **no mail account and no API
+key required**? The demo spins up a throwaway mail server, a webmail UI, and one
+agent — all in Docker, all on your machine, nothing exposed to the internet.
+
+```bash
+git clone https://github.com/mxaiorg/kikubot && cd kikubot
+./demo.sh
+```
+
+Then:
+
+1. Open the webmail UI at **http://localhost:8000**
+2. Log in as `human@demo.local` (any password — the demo mail server has auth disabled)
+3. Compose a new email to **`kiku@demo.local`** and send it
+4. Wait ~30s, refresh the inbox — **Kiku replies.** 🎉
+
+Out of the box (no API key) Kiku replies with a short "I'm alive — add a key for
+real answers" notice, so you get the round-trip moment at zero cost. To unlock
+real agent responses, drop a key into `configs/demo/secrets.env` and run
+`./demo.sh` again — paste either an `ANTHROPIC_API_KEY` or an `OPENROUTER_API_KEY`
+and the script auto-selects the matching provider for you (no config editing).
+Stop everything with `./demo.sh down`.
+
+Under the hood (`docker-compose-demo.yml`): [GreenMail](https://greenmail-mail-test.github.io/greenmail/)
+provides SMTP/IMAP, [Roundcube](https://roundcube.net/) is the compose-window, and
+the agent is the same image as production — just pointed at the demo config in
+`configs/demo/`.
+
 ## References
 
 This project is based on the research of mxHERO Labs. See our [blog post](https://medium.com/datadriveninvestor/the-ai-organization-source-code-included-f2359da8e35e) for more details. 

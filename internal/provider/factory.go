@@ -17,6 +17,16 @@ import (
 // selected automatically since Anthropic's own API doesn't use prefixed
 // model names.
 func NewProvider() Provider {
+	// No key configured → return a harmless stub so the process can start and
+	// stay up (the OpenRouter provider would otherwise log.Fatal here). The
+	// poll loop detects config.LLMKeyMissing and replies with a demo notice
+	// instead of ever calling the LLM. This is what makes the no-cost demo work
+	// before the user pastes a key.
+	if config.LLMKeyMissing {
+		log.Println("no LLM API key configured — using stub provider (demo mode); set ANTHROPIC_API_KEY or OPENROUTER_API_KEY for real replies")
+		return newStubProvider()
+	}
+
 	prov := strings.ToLower(config.LlmProvider)
 
 	switch prov {

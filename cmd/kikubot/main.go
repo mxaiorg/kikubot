@@ -149,6 +149,25 @@ func process(parent context.Context) {
 				}
 				continue
 			}
+
+			// DEMO MODE — no LLM key configured. Reply with a templated notice
+			// instead of invoking the LLM (which can't produce an answer without
+			// a key). This is the "Hello World" moment for docker-compose-demo.yml:
+			// the agent provably received the mail and replied, and the notice
+			// tells the user how to unlock real responses. Mirrors the
+			// out-of-band, never-call-the-LLM pattern used for auto-replies.
+			if config.LLMKeyMissing {
+				log.Printf("demo mode (no LLM key): replying with setup notice to %s", email.From)
+				if replyErr := services.SendBounce(parent, email, demoNoKeyNotice()); replyErr != nil {
+					log.Println("error sending demo notice:", replyErr)
+					// SendBounce marks seen only on success; mark manually so a
+					// down SMTP server can't wedge us in an infinite retry loop.
+					if markErr := services.MarkSeen(parent, []string{email.MessageId}); markErr != nil {
+						log.Println("error marking demo email as seen:", markErr)
+					}
+				}
+				continue
+			}
 			var history []anthropic.MessageParam
 			// Resolve the thread root with Outlook Thread-Index fallback so
 			// Exchange-rewritten References don't orphan the inbound from
@@ -432,6 +451,26 @@ func rescheduleWatchdog(parent context.Context, snooze *services.Snooze) {
 	if err := snooze.SaveSnooze(parent); err != nil {
 		log.Printf("watchdog: error rescheduling %s: %s", snooze.ThreadId, err)
 	}
+}
+
+// demoNoKeyNotice is the templated reply sent when the agent is running without
+// an LLM API key (config.LLMKeyMissing). It confirms the round-trip works and
+// tells the user how to enable real responses. Used by the no-cost demo.
+func demoNoKeyNotice() string {
+	return "✅ Kikubot is alive — your email reached the agent and it replied. 🎉\n" +
+		"\n" +
+		"This is the no-cost demo running WITHOUT an LLM API key, so I can't generate\n" +
+		"a real answer yet. To unlock full agent responses:\n" +
+		"\n" +
+		"  1. Get an Anthropic API key: https://console.anthropic.com/settings/keys\n" +
+		"  2. Add it to configs/demo/secrets.env   →   ANTHROPIC_API_KEY=sk-ant-...\n" +
+		"  3. Restart the demo:   docker compose -f docker-compose-demo.yml up -d\n" +
+		"\n" +
+		"Prefer a free model? Set OPENROUTER_API_KEY instead and switch llm_provider\n" +
+		"to openrouter in configs/demo/agents.yaml. See the README \"Try the demo\"\n" +
+		"section for the full walkthrough.\n" +
+		"\n" +
+		"— Kiku (demo)\n"
 }
 
 // isAutoReply reports whether an RFC 3834 Auto-Submitted value indicates a

@@ -28,8 +28,15 @@ var (
 	LlmModel            string
 	LlmProvider         string   // "anthropic" (default) or "openrouter"
 	LlmOpenRouterBackup []string // ordered fallback models for OpenRouter
-	SysPrompt           string
-	AgentTimeout        int // in seconds
+	// LLMKeyMissing is true when the selected provider's API key env var is
+	// empty. It lets the runtime degrade gracefully instead of crashing: the
+	// provider factory returns a harmless stub (so startup doesn't log.Fatal)
+	// and process() replies to inbound mail with a "running, but needs an API
+	// key" notice instead of invoking the LLM. This is what powers the no-cost
+	// demo (docker-compose-demo.yml) before the user pastes a key.
+	LLMKeyMissing bool
+	SysPrompt     string
+	AgentTimeout  int // in seconds
 	// WaitingWatchdogMinutes is the deadline, in minutes, after which a thread
 	// still in the "waiting" state re-wakes its coordinator (see
 	// services.ArmWaitingWatchdog). 0 disables the watchdog.
@@ -167,6 +174,28 @@ func Apply(cfg *AgentsConfig) {
 		LlmOpenRouterBackup = trimAll(agent.LLMOpenRouterBackup)
 	} else {
 		LlmOpenRouterBackup = nil
+	}
+
+	// Env overrides for provider/model take precedence over agents.yaml. This
+	// lets a deployment switch LLM backends without editing config — used by the
+	// demo, where demo.sh picks the provider from whichever API key the user
+	// pasted (so an OpenRouter user doesn't have to hand-edit agents.yaml).
+	if v := strings.TrimSpace(os.Getenv("LLM_PROVIDER")); v != "" {
+		LlmProvider = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LLM_MODEL")); v != "" {
+		LlmModel = v
+	}
+
+	// Detect a missing provider key. Mirror the provider factory's selection
+	// (anthropic unless LlmProvider is explicitly "openrouter") and check the
+	// matching env var. When empty, the runtime degrades to the demo notice
+	// path rather than crashing on the first API call (or, for OpenRouter, at
+	// construction time, which log.Fatals).
+	if strings.EqualFold(LlmProvider, "openrouter") {
+		LLMKeyMissing = strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == ""
+	} else {
+		LLMKeyMissing = strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == ""
 	}
 
 	SysPrompt = pickStr(agentStr(agent, func(a *AgentDef) string { return a.SystemPrompt }), common.SystemPrompt)

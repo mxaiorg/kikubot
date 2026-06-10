@@ -1,0 +1,45 @@
+# Kikubot DEMO configuration — used by docker-compose-demo.yml.
+#
+# This is a self-contained, zero-cost "Hello World" deployment: one agent
+# (Kiku) talking to a throwaway in-container mail server (GreenMail) with a
+# Roundcube webmail UI for you to send/read mail. Nothing leaves your machine.
+#
+# Without an LLM API key the agent still runs and replies with a setup notice
+# (so you get the round-trip "it works!" moment). Add a key to
+# configs/demo/secrets.env to unlock real agent responses.
+
+common:
+  # GreenMail (see docker-compose-demo.yml). The agent's IMAP client always
+  # uses implicit TLS, so we point it at GreenMail's IMAPS port (3993) and SMTP
+  # submission port (3025). GreenMail ships a self-signed cert → insecure TLS.
+  email_server: greenmail:3993
+  smtp_server: greenmail:3025
+  email_insecure_tls: true
+
+  max_history_chars: 100000
+  max_tokens: 2000
+  agent_timeout: 300
+  max_turns: 8
+  waiting_watchdog_minutes: 0
+
+  system_prompt: |
+    You are Kiku, a friendly demo agent. Greet the user warmly, answer their
+    message concisely, and ALWAYS reply to the user with the report tool when
+    you are done. Keep it short — this is a hello-world demo.
+    {{coworkers}}
+
+agents:
+  - name: Kiku
+    email: kiku@demo.local
+    role: Coordinator
+    description: Demo agent. Greets users and answers simple questions.
+    tools: [report]
+    # Default provider/model (cheap, reliable tool-calling). Requires
+    # ANTHROPIC_API_KEY in configs/demo/secrets.env. Leave the key blank to stay
+    # in demo-notice mode. If you instead paste an OPENROUTER_API_KEY, demo.sh
+    # auto-overrides these via the LLM_PROVIDER / LLM_MODEL env vars — no edit
+    # here needed.
+    llm_provider: anthropic
+    llm_model: claude-haiku-4-5-20251001
+    # No whitelist/blacklist → the agent accepts mail from anyone (fine for a
+    # local-only demo; the mail server isn't reachable from the internet).

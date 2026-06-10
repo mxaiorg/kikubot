@@ -1,0 +1,76 @@
+# Kikubot — zero-cost local demo.
+#
+#   ./demo.sh        (copies secrets, then runs the command below)
+#   docker compose -f docker-compose-demo.yml up --build
+#
+# Three containers on a private network, nothing exposed to the internet:
+#   • greenmail  — throwaway SMTP/IMAP server (auth disabled, in-memory)
+#   • webmail    — Roundcube UI to send/read mail   → http://localhost:8000
+#   • kiku-demo  — the agent, polling kiku@demo.local
+#
+# Send a mail from the webmail UI to kiku@demo.local and watch the reply land.
+# Without an LLM key Kiku replies with a setup notice; add ANTHROPIC_API_KEY to
+# configs/demo/secrets.env and `up -d` again for real answers.
+
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.0
+    environment:
+      # setup.test.all opens SMTP 3025 / IMAP 3143 / IMAPS 3993 / etc.
+      # auth.disabled → any login+password works and mailboxes auto-create,
+      # so there's nothing to provision and no password to keep in sync.
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.all
+        -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.auth.disabled
+        -Dgreenmail.verbose
+    ports:
+      - "8080:8080" # GreenMail REST API (optional, for poking around)
+    healthcheck:
+      # Wait until the IMAPS port (the one the agent connects to) is accepting
+      # connections, so kiku-demo doesn't log a "connection refused" on its
+      # first poll. GreenMail's image has bash + /dev/tcp but no curl/nc.
+      test: ["CMD", "bash", "-c", ":</dev/tcp/127.0.0.1/3993"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  webmail:
+    image: roundcube/roundcubemail:latest
+    depends_on:
+      greenmail:
+        condition: service_healthy
+    environment:
+      # Plaintext IMAP/SMTP against GreenMail (no cert hassle on the UI side;
+      # the agent uses the TLS port instead — see configs/demo/agents.yaml).
+      ROUNDCUBEMAIL_DEFAULT_HOST: greenmail
+      ROUNDCUBEMAIL_DEFAULT_PORT: "3143"
+      ROUNDCUBEMAIL_SMTP_SERVER: greenmail
+      ROUNDCUBEMAIL_SMTP_PORT: "3025"
+      ROUNDCUBEMAIL_DB_TYPE: sqlite
+    ports:
+      - "8000:80" # open http://localhost:8000 — log in as human@demo.local (any password)
+
+  kiku-demo:
+    build: .
+    depends_on:
+      greenmail:
+        condition: service_healthy
+    env_file:
+      - configs/demo/secrets.env
+    environment:
+      - RUNNING_IN_CONTAINER=true
+      - AGENT_EMAIL=kiku@demo.local
+      - AGENTS_CONFIG=/app/configs/agents.yaml
+      # Provider/model overrides. demo.sh sets these from whichever API key you
+      # pasted (blank → fall back to the anthropic default in agents.yaml).
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+    restart: unless-stopped
+    volumes:
+      # Demo config + knowledge, mounted read-only (hot-reloads on edit).
+      - ./configs/demo/agents.yaml:/app/configs/agents.yaml:ro
+      - ./configs/demo/knowledge:/app/knowledge:ro
+      # Per-thread memory persists here across restarts.
+      - ./data/kiku-demo:/app/data

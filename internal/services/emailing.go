@@ -887,7 +887,16 @@ func SendEmail(ctx context.Context, msg Email) error {
 		}))
 	}
 
-	d := gomail.NewDialer(config.SmtpServer, config.SmtpPort, config.AgentEmail, config.EmailPassword)
+	// Drop the username when no password is configured so gomail doesn't
+	// attempt SMTP AUTH. Go's smtp.PlainAuth refuses to send credentials over
+	// an unencrypted, non-localhost connection ("unencrypted connection"), which
+	// breaks against auth-less local servers like the demo's GreenMail. A real
+	// server always has a password, so this only affects credential-less setups.
+	smtpUser := config.AgentEmail
+	if config.EmailPassword == "" {
+		smtpUser = ""
+	}
+	d := gomail.NewDialer(config.SmtpServer, config.SmtpPort, smtpUser, config.EmailPassword)
 	d.LocalName = config.SmtpHelo
 	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 

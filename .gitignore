@@ -2,6 +2,8 @@
 /services/dms/certs/privkey.pem
 /configs/secrets.env
 /configs/agents.yaml
+# Demo: the example is committed; the copied live secrets file is not.
+/configs/demo/secrets.env
 /services/dms/maildata/
 /data/
 /box_config.json

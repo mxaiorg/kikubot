@@ -14,8 +14,8 @@ FROM alpine:latest
 RUN apk add --no-cache ca-certificates nodejs npm bash curl jq
 
 # Pre-install MCP server & CLI packages so npx doesn't download them at runtime
-RUN npm install --global @tsmztech/mcp-server-salesforce
-RUN npm install -g @xeroapi/xero-mcp-server
+#RUN npm install --global @tsmztech/mcp-server-salesforce
+#RUN npm install -g @xeroapi/xero-mcp-server
 
 # https://developer.box.com/guides/cli/cli-with-jwt-authentication/jwt-cli
 # Box CLI auth: copy your Box app services JSON into the image, then
@@ -29,6 +29,9 @@ WORKDIR /app
 COPY --from=builder /app/kiku .
 # Copy knowledge files if they exist; the app handles missing dirs gracefully.
 COPY --from=builder /app/configs/knowledge/ ./knowledge/
-COPY --from=builder /app/configs/agents.yaml .
+# Wildcard so a fresh clone (which has agents-example.yaml but no gitignored
+# agents.yaml — e.g. the demo) still builds. The runtime resolves config via
+# AGENTS_CONFIG first, so the baked file is only a fallback default anyway.
+COPY --from=builder /app/configs/agents*.yaml ./
 
 CMD ["./kiku"]
