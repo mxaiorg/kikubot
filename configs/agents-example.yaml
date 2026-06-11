@@ -42,6 +42,9 @@ agents:
     role: Coordinator
     description: Communicates with users. Manages tasks and resources. Coordinates other agents.
     tools: [report, snooze]
+    # Optional: remove normally core tools for public/customer-facing agents.
+    # Names match the tool's runtime Name, not the registry key.
+    # disabled_tools: [message_tool, mailbox_search, save_attachment]
     # Coordinator overrides — bigger history budget and more turns because
     # each delegation round-trip burns a turn.
     llm_provider: openrouter
