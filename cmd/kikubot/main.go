@@ -680,6 +680,9 @@ func initAgent() {
 
 	// Deduplicate scripts by name
 	agentTools = dedupTools(agentTools)
+	if disabled := disabledToolNames(cfg, config.AgentEmail); len(disabled) > 0 {
+		agentTools = filterDisabledTools(agentTools, disabled)
+	}
 	//for _, tool := range agentTools {
 	//	log.Println("loaded tool:", tool.Name)
 	//}
@@ -746,6 +749,48 @@ func dedupTools(toolList []tools.ToolDefinition) []tools.ToolDefinition {
 		agentTools = append(agentTools, tool)
 	}
 	return agentTools
+}
+
+// disabledToolNames collects the set of tool names to strip from an agent's
+// toolset, merging common.disabled_tools with the agent's own disabled_tools.
+// Names are matched against ToolDefinition.Name (e.g. "message_tool"), so this
+// can remove normally-core tools as well as keyed ones.
+func disabledToolNames(cfg *config.AgentsConfig, agentEmail string) map[string]bool {
+	if cfg == nil {
+		return nil
+	}
+	disabled := make(map[string]bool)
+	for _, name := range cfg.Common.DisabledTools {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			disabled[name] = true
+		}
+	}
+	if agentDef := cfg.FindAgent(agentEmail); agentDef != nil {
+		for _, name := range agentDef.DisabledTools {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				disabled[name] = true
+			}
+		}
+	}
+	return disabled
+}
+
+// filterDisabledTools drops any tool whose Name is in the disabled set.
+func filterDisabledTools(toolList []tools.ToolDefinition, disabled map[string]bool) []tools.ToolDefinition {
+	if len(disabled) == 0 {
+		return toolList
+	}
+	filtered := make([]tools.ToolDefinition, 0, len(toolList))
+	for _, tool := range toolList {
+		if disabled[tool.Name] {
+			log.Printf("tool %q disabled by agents.yaml", tool.Name)
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
 }
 
 // knowledgeBaseDir returns the path to the knowledge directory next to the

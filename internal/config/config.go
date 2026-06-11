@@ -28,11 +28,12 @@ import (
 // at the {{coworkers}} template marker — the LLM only sees the identity-and-
 // description fields, never overrides or secrets.
 type AgentDef struct {
-	Name        string   `yaml:"name" json:"name,omitempty"`
-	Email       string   `yaml:"email" json:"email,omitempty"`
-	Role        string   `yaml:"role" json:"role,omitempty"`
-	Description string   `yaml:"description" json:"description,omitempty"`
-	Tools       []string `yaml:"tools,flow,omitempty" json:"-"`
+	Name          string   `yaml:"name" json:"name,omitempty"`
+	Email         string   `yaml:"email" json:"email,omitempty"`
+	Role          string   `yaml:"role" json:"role,omitempty"`
+	Description   string   `yaml:"description" json:"description,omitempty"`
+	Tools         []string `yaml:"tools,flow,omitempty" json:"-"`
+	DisabledTools []string `yaml:"disabled_tools,flow,omitempty" json:"-"`
 
 	// Per-agent overrides. A nil/zero value means "inherit from common".
 	LLMProvider            string   `yaml:"llm_provider,omitempty" json:"-"`
@@ -89,19 +90,20 @@ type PromptPeer struct {
 // CommonConfig holds defaults shared by every agent. Any field can be
 // overridden per-agent in AgentDef.
 type CommonConfig struct {
-	EmailServer             string `yaml:"email_server,omitempty"`
-	SmtpServer              string `yaml:"smtp_server,omitempty"`
-	EmailInsecureTLS        bool   `yaml:"email_insecure_tls,omitempty"`
-	MaxHistoryChars         int    `yaml:"max_history_chars,omitempty"`
-	MaxTokens               int    `yaml:"max_tokens,omitempty"`
-	MaxTurns                int    `yaml:"max_turns,omitempty"`
-	MaxToolResultChars      *int   `yaml:"max_tool_result_chars,omitempty"`
-	MaxEmailRetries         int    `yaml:"max_email_retries,omitempty"`
-	MaxMessageBodyChars     int    `yaml:"max_message_body_chars,omitempty"`
-	AgentTimeout            int    `yaml:"agent_timeout,omitempty"`
-	WaitingWatchdogMinutes  int    `yaml:"waiting_watchdog_minutes,omitempty"`
-	SystemPrompt            string `yaml:"system_prompt,omitempty"`
-	CoordinatorSystemPrompt string `yaml:"coordinator_system_prompt,omitempty"`
+	EmailServer             string   `yaml:"email_server,omitempty"`
+	SmtpServer              string   `yaml:"smtp_server,omitempty"`
+	EmailInsecureTLS        bool     `yaml:"email_insecure_tls,omitempty"`
+	MaxHistoryChars         int      `yaml:"max_history_chars,omitempty"`
+	MaxTokens               int      `yaml:"max_tokens,omitempty"`
+	MaxTurns                int      `yaml:"max_turns,omitempty"`
+	MaxToolResultChars      *int     `yaml:"max_tool_result_chars,omitempty"`
+	MaxEmailRetries         int      `yaml:"max_email_retries,omitempty"`
+	MaxMessageBodyChars     int      `yaml:"max_message_body_chars,omitempty"`
+	AgentTimeout            int      `yaml:"agent_timeout,omitempty"`
+	WaitingWatchdogMinutes  int      `yaml:"waiting_watchdog_minutes,omitempty"`
+	SystemPrompt            string   `yaml:"system_prompt,omitempty"`
+	CoordinatorSystemPrompt string   `yaml:"coordinator_system_prompt,omitempty"`
+	DisabledTools           []string `yaml:"disabled_tools,flow,omitempty"`
 }
 
 // AgentsConfig is the deserialised contents of configs/agents.yaml.
