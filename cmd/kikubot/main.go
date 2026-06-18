@@ -53,6 +53,67 @@ var (
 // operator may have fixed something. Bounded by MAX_EMAIL_RETRIES.
 var emailRetryCounts = map[string]int{}
 
+// pollerAgent is the slice of *agents.Agent that the per-email poll loop needs.
+// Narrowing the dependency to an interface (rather than the concrete *Agent)
+// lets developers swap the agent for a fake when exercising processNewEmails,
+// without rewriting the loop.
+type pollerAgent interface {
+	ClearHistory()
+	SetHistory([]anthropic.MessageParam)
+	History() []anthropic.MessageParam
+	HandleMessage(context.Context, string, *services.Email, int) error
+}
+
+// pollerDeps collects every external function the per-email processing loop
+// calls. Bundling them behind a struct of function values turns the loop into
+// a thin orchestrator: a developer who wants to alter one piece of core
+// behaviour (memory loading, bounce sending, access control, …) overrides a
+// single field instead of editing — and re-testing — the whole loop. The
+// zero-value-friendly defaults live in defaultPollerDeps; production code calls
+// processNewEmails(parent, emails, defaultPollerDeps()).
+type pollerDeps struct {
+	agent                     pollerAgent
+	accessControl             func(context.Context, services.Email) error
+	resolveThreadRoot         func(*services.Email) (string, error)
+	getMemory                 func(string) (*services.Memory, error)
+	memoryFromReferences      func(context.Context, []string) (*services.Memory, error)
+	rememberThreadIndex       func(string, string, string) error
+	saveMemoryHistory         func(context.Context, []anthropic.MessageParam, string) error
+	stripAttachmentBlobs      func([]anthropic.MessageParam) []anthropic.MessageParam
+	isAdminReviewThread       func(string) bool
+	handleAdminReviewFollowUp func(context.Context, *services.Email, string) (bool, error)
+	leaveUnreadForAdminReview func(context.Context, string, string)
+	markSeen                  func(context.Context, []string) error
+	sendBounce                func(context.Context, services.Email, string) error
+	addToSenders              func([]string, string) []string
+	handleAutoReply           func(context.Context, services.Email)
+}
+
+// defaultPollerDeps wires the abstraction to this codebase's real
+// implementations. Admin-review handling is not implemented in this build, so
+// those three fields point at local stubs (isAdminReviewThread always reports
+// false, the follow-up hook is a no-op, and leaveUnreadForAdminReview just
+// logs); see their definitions below.
+func defaultPollerDeps() pollerDeps {
+	return pollerDeps{
+		agent:                     agent,
+		accessControl:             agents.AccessControl,
+		resolveThreadRoot:         services.ResolveThreadRoot,
+		getMemory:                 services.GetMemory,
+		memoryFromReferences:      services.MemoryFromReferences,
+		rememberThreadIndex:       services.RememberThreadIndex,
+		saveMemoryHistory:         services.SaveMemoryHistory,
+		stripAttachmentBlobs:      agents.StripAttachmentBlobs,
+		isAdminReviewThread:       isAdminReviewThread,
+		handleAdminReviewFollowUp: handleAdminReviewFollowUp,
+		leaveUnreadForAdminReview: leaveUnreadForAdminReview,
+		markSeen:                  services.MarkSeen,
+		sendBounce:                services.SendBounce,
+		addToSenders:              services.AddToSenders,
+		handleAutoReply:           handleAutoReply,
+	}
+}
+
 func main() {
 	log.SetFlags(log.Lshortfile)
 
@@ -123,200 +184,7 @@ func process(parent context.Context) {
 	}
 
 	if len(emails) > 0 {
-		var processed []string // Message-Ids to mark as seen
-		for _, email := range emails {
-			fmt.Println("NEW EMAIL:", email.MessageId)
-			email.Senders = services.AddToSenders(email.Senders, email.From)
-
-			// Auto-replies (bounces, out-of-office) MUST NOT reach the LLM.
-			// Feeding them back causes the LLM to retry the task and create
-			// a ping-pong loop. Handle them out-of-band and skip the LLM.
-			if isAutoReply(email.AutoSubmitted) {
-				handleAutoReply(parent, email)
-				if markErr := services.MarkSeen(parent, []string{email.MessageId}); markErr != nil {
-					log.Println("error marking auto-reply as seen:", markErr)
-				}
-				continue
-			}
-
-			// ACCESS CONTROL
-			if aclErr := agents.AccessControl(parent, email); aclErr != nil {
-				log.Println("error checking access control:", aclErr)
-				bounceMsg := fmt.Sprintf("🔒 Agent %s is not allowed to receive this email: %s\n", config.AgentName, aclErr.Error())
-				bounceErr := services.SendBounce(parent, email, bounceMsg)
-				if bounceErr != nil {
-					log.Println("error sending bounce:", bounceErr)
-				}
-				continue
-			}
-
-			// DEMO MODE — no LLM key configured. Reply with a templated notice
-			// instead of invoking the LLM (which can't produce an answer without
-			// a key). This is the "Hello World" moment for docker-compose-demo.yml:
-			// the agent provably received the mail and replied, and the notice
-			// tells the user how to unlock real responses. Mirrors the
-			// out-of-band, never-call-the-LLM pattern used for auto-replies.
-			if config.LLMKeyMissing {
-				log.Printf("demo mode (no LLM key): replying with setup notice to %s", email.From)
-				if replyErr := services.SendBounce(parent, email, demoNoKeyNotice()); replyErr != nil {
-					log.Println("error sending demo notice:", replyErr)
-					// SendBounce marks seen only on success; mark manually so a
-					// down SMTP server can't wedge us in an infinite retry loop.
-					if markErr := services.MarkSeen(parent, []string{email.MessageId}); markErr != nil {
-						log.Println("error marking demo email as seen:", markErr)
-					}
-				}
-				continue
-			}
-			var history []anthropic.MessageParam
-			// Resolve the thread root with Outlook Thread-Index fallback so
-			// Exchange-rewritten References don't orphan the inbound from
-			// its existing memory file. Falls back to email.GetThreadRoot()
-			// when no fingerprint matches, preserving behaviour for
-			// non-MS clients.
-			threadRoot, resolveErr := services.ResolveThreadRoot(&email)
-			if resolveErr != nil {
-				log.Println("error resolving thread root:", resolveErr)
-				continue
-			}
-			// Check the memory queue for each new message
-			// Based on the memory queue - load context for the agent
-			memory, memoryErr := services.GetMemory(threadRoot)
-			if memoryErr != nil && !errors.Is(memoryErr, services.ErrMemoryNotFound) {
-				log.Println("error getting memory:", memoryErr)
-				continue
-			}
-			if memory != nil {
-				history = memory.History
-				memory.ClearStatus()
-			} else {
-				// Fill memory from the message thread
-				memory, memoryErr = services.MemoryFromReferences(parent, email.References)
-				if memoryErr != nil {
-					log.Println("error building memory from references:", memoryErr)
-					continue
-				}
-				// No email history to use, create a new memory
-				if memory == nil {
-					memory = &services.Memory{
-						ThreadRoot: threadRoot,
-					}
-				}
-			}
-
-			// Record the Outlook fingerprint for this thread so future
-			// replies with broken References can still find their way home.
-			// Subject changes mid-thread will register a new index entry,
-			// which is the right behaviour — a renamed conversation is
-			// only safe to merge when both signals agree.
-			if email.ThreadIndexConvID != "" {
-				subj := email.ThreadTopic
-				if subj == "" {
-					subj = email.Subject
-				}
-				if rememberErr := services.RememberThreadIndex(email.ThreadIndexConvID, subj, memory.ThreadRoot); rememberErr != nil {
-					log.Printf("warning: thread index remember failed: %v", rememberErr)
-				}
-			}
-
-			saveErr := services.SaveMemoryHistory(parent, memory.History, email.MessageId)
-			if saveErr != nil {
-				log.Println("error saving memory history:", saveErr)
-				continue
-			}
-
-			// handle message
-			agent.ClearHistory()
-			agent.SetHistory(history)
-			// Need enough time for MCP
-			timeout := time.Duration(config.AgentTimeout) * time.Second
-			ctx, cancel := context.WithTimeout(parent, timeout)
-			err := agent.HandleMessage(ctx, "", &email, config.MaxTurns)
-			cancel()
-			if err != nil {
-				log.Println("error handling message:", err)
-			}
-			// Always save history — even on timeout/error the agent may have
-			// completed useful work (tool calls, partial results) that we want
-			// to preserve for the next attempt.
-			//
-			// StripAttachmentBlobs removes base64 PDF/image payloads before
-			// persisting. The model already processed them in this run; the
-			// EmailSummary block (filename, size) plus subsequent assistant
-			// turns carry forward whatever was learned. Keeping the bytes on
-			// disk just inflates memory files and re-bloats reload for
-			// follow-up emails in the thread.
-			err2 := services.SaveMemoryHistory(parent, agents.StripAttachmentBlobs(agent.History()), email.MessageId)
-			if err2 != nil {
-				log.Println("error saving memory history:", err2)
-			}
-			if err != nil {
-				// Max-turns is not retryable — the agent exhausted its budget
-				// and a retry will just burn another one, creating an infinite
-				// loop (especially for coordinators waiting on peers). Notify
-				// the sender (so the delegation chain can unwind via
-				// handleAutoReply instead of hanging) and mark seen.
-				if errors.Is(err, agents.ErrMaxTurns) {
-					delete(emailRetryCounts, email.MessageId)
-					// If the agent already called set_task_status=complete, the
-					// user has the real answer (typically from report_tool a
-					// turn or two earlier). Suppress the failure notice — it
-					// only confuses recipients who just got a successful reply.
-					if mem, memErr := services.GetMemory(email.GetThreadRoot()); memErr == nil && mem != nil && mem.Status == services.MemoryStatus_Complete {
-						log.Printf("max turns exhausted for email %s but task already marked complete — suppressing notice", email.MessageId)
-						processed = append(processed, email.MessageId)
-						continue
-					}
-					log.Printf("max turns exhausted for email %s — notifying sender and marking seen", email.MessageId)
-					notice := fmt.Sprintf(
-						"⚠️ Agent %s exhausted its turn budget (%d turns) while processing this task and could not complete it. Partial progress has been preserved in the thread history, but no final answer was produced.\n",
-						config.AgentName, config.MaxTurns,
-					)
-					if bounceErr := services.SendBounce(parent, email, notice); bounceErr != nil {
-						log.Println("error sending max-turns notice:", bounceErr)
-						// SendBounce marks seen on success; on failure mark
-						// manually so we still break the loop.
-						processed = append(processed, email.MessageId)
-					}
-					continue
-				}
-				// Don't mark as seen — transient errors will be retried next poll.
-				// But cap retries so a deterministic-fail message can't loop
-				// forever burning tokens (e.g. truncated tool calls, poisoned
-				// memory, provider 5xx that never clears).
-				emailRetryCounts[email.MessageId]++
-				attempt := emailRetryCounts[email.MessageId]
-				if attempt >= config.MaxEmailRetries {
-					log.Printf("email %s exceeded retry budget (%d) — bouncing and marking seen",
-						email.MessageId, config.MaxEmailRetries)
-					notice := fmt.Sprintf(
-						"⚠️ Agent %s could not process this email after %d attempts (last error: %v). "+
-							"Marking it as seen to break the retry loop. Please review the agent logs "+
-							"and resend if the underlying issue has been addressed.\n",
-						config.AgentName, attempt, err,
-					)
-					if bounceErr := services.SendBounce(parent, email, notice); bounceErr != nil {
-						log.Println("error sending retry-budget notice:", bounceErr)
-						// SendBounce marks seen on success; on failure mark
-						// manually so we still break the loop.
-						processed = append(processed, email.MessageId)
-					}
-					delete(emailRetryCounts, email.MessageId)
-					continue
-				}
-				log.Printf("leaving email %s as unseen for retry (attempt %d/%d)",
-					email.MessageId, attempt, config.MaxEmailRetries)
-				continue
-			}
-			delete(emailRetryCounts, email.MessageId)
-			processed = append(processed, email.MessageId)
-		}
-		// Mark successfully processed emails as seen
-		if len(processed) > 0 {
-			if markErr := services.MarkSeen(parent, processed); markErr != nil {
-				log.Println("error marking emails as seen:", markErr)
-			}
-		}
+		processNewEmails(parent, emails, defaultPollerDeps())
 	} else {
 		//log.Println("no new emails found")
 	}
@@ -451,6 +319,270 @@ func rescheduleWatchdog(parent context.Context, snooze *services.Snooze) {
 	if err := snooze.SaveSnooze(parent); err != nil {
 		log.Printf("watchdog: error rescheduling %s: %s", snooze.ThreadId, err)
 	}
+}
+
+// processNewEmails runs the per-email poll loop against a pollerDeps bundle.
+// process() calls it with defaultPollerDeps(); the indirection lets each piece
+// of core behaviour be overridden in isolation. A nil-agent deps falls back to
+// defaults so a zero-value pollerDeps still works.
+func processNewEmails(parent context.Context, emails []services.Email, deps pollerDeps) {
+	if deps.agent == nil {
+		deps = defaultPollerDeps()
+	}
+	if deps.handleAdminReviewFollowUp == nil {
+		deps.handleAdminReviewFollowUp = handleAdminReviewFollowUp
+	}
+	var processed []string // Message-Ids to mark as seen
+	for _, email := range emails {
+		fmt.Println("NEW EMAIL:", email.MessageId)
+		email.Senders = deps.addToSenders(email.Senders, email.From)
+
+		// Auto-replies (bounces, out-of-office) MUST NOT reach the LLM.
+		// Feeding them back causes the LLM to retry the task and create
+		// a ping-pong loop. Handle them out-of-band and skip the LLM.
+		if isAutoReply(email.AutoSubmitted) {
+			deps.handleAutoReply(parent, email)
+			if markErr := deps.markSeen(parent, []string{email.MessageId}); markErr != nil {
+				log.Println("error marking auto-reply as seen:", markErr)
+			}
+			continue
+		}
+
+		// ACCESS CONTROL
+		if aclErr := deps.accessControl(parent, email); aclErr != nil {
+			log.Println("error checking access control:", aclErr)
+			bounceMsg := fmt.Sprintf("🔒 Agent %s is not allowed to receive this email: %s\n", config.AgentName, aclErr.Error())
+			bounceErr := deps.sendBounce(parent, email, bounceMsg)
+			if bounceErr != nil {
+				log.Println("error sending bounce:", bounceErr)
+			}
+			continue
+		}
+
+		// DEMO MODE — no LLM key configured. Reply with a templated notice
+		// instead of invoking the LLM (which can't produce an answer without
+		// a key). This is the "Hello World" moment for docker-compose-demo.yml:
+		// the agent provably received the mail and replied, and the notice
+		// tells the user how to unlock real responses. Mirrors the
+		// out-of-band, never-call-the-LLM pattern used for auto-replies.
+		if config.LLMKeyMissing {
+			log.Printf("demo mode (no LLM key): replying with setup notice to %s", email.From)
+			if replyErr := deps.sendBounce(parent, email, demoNoKeyNotice()); replyErr != nil {
+				log.Println("error sending demo notice:", replyErr)
+				// SendBounce marks seen only on success; mark manually so a
+				// down SMTP server can't wedge us in an infinite retry loop.
+				if markErr := deps.markSeen(parent, []string{email.MessageId}); markErr != nil {
+					log.Println("error marking demo email as seen:", markErr)
+				}
+			}
+			continue
+		}
+		var history []anthropic.MessageParam
+		// Resolve the thread root with Outlook Thread-Index fallback so
+		// Exchange-rewritten References don't orphan the inbound from
+		// its existing memory file. Falls back to email.GetThreadRoot()
+		// when no fingerprint matches, preserving behaviour for
+		// non-MS clients.
+		threadRoot, resolveErr := deps.resolveThreadRoot(&email)
+		if resolveErr != nil {
+			log.Println("error resolving thread root:", resolveErr)
+			continue
+		}
+		// Check the memory queue for each new message
+		// Based on the memory queue - load context for the agent
+		memory, memoryErr := deps.getMemory(threadRoot)
+		if memoryErr != nil && !errors.Is(memoryErr, services.ErrMemoryNotFound) {
+			log.Println("error getting memory:", memoryErr)
+			continue
+		}
+		if memory != nil {
+			// Admin-review threads are escalated to a human and must not be
+			// fed back to the LLM. This build stubs the flow (status is never
+			// set), but the branch is wired through deps so a developer can
+			// enable it by overriding the admin-review fields.
+			if memory.Status == services.MemoryStatus_AdminReview {
+				if handled, hookErr := deps.handleAdminReviewFollowUp(parent, &email, threadRoot); hookErr != nil {
+					log.Println("error handling admin-review follow-up:", hookErr)
+					deps.leaveUnreadForAdminReview(parent, email.MessageId, threadRoot)
+				} else if handled {
+					processed = append(processed, email.MessageId)
+				} else {
+					deps.leaveUnreadForAdminReview(parent, email.MessageId, threadRoot)
+				}
+				continue
+			}
+			history = memory.History
+			memory.ClearStatus()
+		} else {
+			// Fill memory from the message thread
+			memory, memoryErr = deps.memoryFromReferences(parent, email.References)
+			if memoryErr != nil {
+				log.Println("error building memory from references:", memoryErr)
+				continue
+			}
+			// No email history to use, create a new memory
+			if memory == nil {
+				memory = &services.Memory{
+					ThreadRoot: threadRoot,
+				}
+			}
+		}
+
+		// Record the Outlook fingerprint for this thread so future
+		// replies with broken References can still find their way home.
+		// Subject changes mid-thread will register a new index entry,
+		// which is the right behaviour — a renamed conversation is
+		// only safe to merge when both signals agree.
+		if email.ThreadIndexConvID != "" {
+			subj := email.ThreadTopic
+			if subj == "" {
+				subj = email.Subject
+			}
+			if rememberErr := deps.rememberThreadIndex(email.ThreadIndexConvID, subj, memory.ThreadRoot); rememberErr != nil {
+				log.Printf("warning: thread index remember failed: %v", rememberErr)
+			}
+		}
+
+		saveErr := deps.saveMemoryHistory(parent, memory.History, email.MessageId)
+		if saveErr != nil {
+			log.Println("error saving memory history:", saveErr)
+			continue
+		}
+
+		// handle message
+		deps.agent.ClearHistory()
+		deps.agent.SetHistory(history)
+		// Need enough time for MCP
+		timeout := time.Duration(config.AgentTimeout) * time.Second
+		ctx, cancel := context.WithTimeout(parent, timeout)
+		err := deps.agent.HandleMessage(ctx, "", &email, config.MaxTurns)
+		cancel()
+		if err != nil {
+			log.Println("error handling message:", err)
+		}
+		// Always save history — even on timeout/error the agent may have
+		// completed useful work (tool calls, partial results) that we want
+		// to preserve for the next attempt.
+		//
+		// StripAttachmentBlobs removes base64 PDF/image payloads before
+		// persisting. The model already processed them in this run; the
+		// EmailSummary block (filename, size) plus subsequent assistant
+		// turns carry forward whatever was learned. Keeping the bytes on
+		// disk just inflates memory files and re-bloats reload for
+		// follow-up emails in the thread.
+		err2 := deps.saveMemoryHistory(parent, deps.stripAttachmentBlobs(deps.agent.History()), email.MessageId)
+		if err2 != nil {
+			log.Println("error saving memory history:", err2)
+		}
+		if deps.isAdminReviewThread(threadRoot) {
+			delete(emailRetryCounts, email.MessageId)
+			deps.leaveUnreadForAdminReview(parent, email.MessageId, threadRoot)
+			continue
+		}
+		if err != nil {
+			// Max-turns is not retryable — the agent exhausted its budget
+			// and a retry will just burn another one, creating an infinite
+			// loop (especially for coordinators waiting on peers). Notify
+			// the sender (so the delegation chain can unwind via
+			// handleAutoReply instead of hanging) and mark seen.
+			if errors.Is(err, agents.ErrMaxTurns) {
+				delete(emailRetryCounts, email.MessageId)
+				// If the agent already called set_task_status=complete, the
+				// user has the real answer (typically from report_tool a
+				// turn or two earlier). Suppress the failure notice — it
+				// only confuses recipients who just got a successful reply.
+				if mem, memErr := deps.getMemory(email.GetThreadRoot()); memErr == nil && mem != nil && mem.Status == services.MemoryStatus_Complete {
+					log.Printf("max turns exhausted for email %s but task already marked complete — suppressing notice", email.MessageId)
+					processed = append(processed, email.MessageId)
+					continue
+				}
+				log.Printf("max turns exhausted for email %s — notifying sender and marking seen", email.MessageId)
+				notice := fmt.Sprintf(
+					"⚠️ Agent %s exhausted its turn budget (%d turns) while processing this task and could not complete it. Partial progress has been preserved in the thread history, but no final answer was produced.\n",
+					config.AgentName, config.MaxTurns,
+				)
+				if bounceErr := deps.sendBounce(parent, email, notice); bounceErr != nil {
+					log.Println("error sending max-turns notice:", bounceErr)
+					// SendBounce marks seen on success; on failure mark
+					// manually so we still break the loop.
+					processed = append(processed, email.MessageId)
+				}
+				continue
+			}
+			// Don't mark as seen — transient errors will be retried next poll.
+			// But cap retries so a deterministic-fail message can't loop
+			// forever burning tokens (e.g. truncated tool calls, poisoned
+			// memory, provider 5xx that never clears).
+			emailRetryCounts[email.MessageId]++
+			attempt := emailRetryCounts[email.MessageId]
+			if attempt >= config.MaxEmailRetries {
+				log.Printf("email %s exceeded retry budget (%d) — bouncing and marking seen",
+					email.MessageId, config.MaxEmailRetries)
+				notice := fmt.Sprintf(
+					"⚠️ Agent %s could not process this email after %d attempts (last error: %v). "+
+						"Marking it as seen to break the retry loop. Please review the agent logs "+
+						"and resend if the underlying issue has been addressed.\n",
+					config.AgentName, attempt, err,
+				)
+				if bounceErr := deps.sendBounce(parent, email, notice); bounceErr != nil {
+					log.Println("error sending retry-budget notice:", bounceErr)
+					// SendBounce marks seen on success; on failure mark
+					// manually so we still break the loop.
+					processed = append(processed, email.MessageId)
+				}
+				delete(emailRetryCounts, email.MessageId)
+				continue
+			}
+			log.Printf("leaving email %s as unseen for retry (attempt %d/%d)",
+				email.MessageId, attempt, config.MaxEmailRetries)
+			continue
+		}
+		delete(emailRetryCounts, email.MessageId)
+		processed = append(processed, email.MessageId)
+	}
+	// Mark successfully processed emails as seen
+	if len(processed) > 0 {
+		if markErr := deps.markSeen(parent, processed); markErr != nil {
+			log.Println("error marking emails as seen:", markErr)
+		}
+	}
+}
+
+// --- Admin-review stubs ---------------------------------------------------
+//
+// The admin-review escalation flow (a thread parked for human review instead of
+// being answered by the LLM) is part of the pollerDeps abstraction but is not
+// implemented in this build. These stubs satisfy the abstraction so the loop
+// compiles and stays close to the origin codebase; wire them to real
+// implementations (and start setting services.MemoryStatus_AdminReview) to
+// enable the flow.
+
+// isAdminReviewThread reports whether a thread is parked for admin review.
+// Stub: this build never sets MemoryStatus_AdminReview, so it always returns
+// false. The check is kept structurally identical to the origin so enabling the
+// flow is a one-function change.
+func isAdminReviewThread(threadRoot string) bool {
+	memory, err := services.GetMemory(threadRoot)
+	if err != nil {
+		if !errors.Is(err, services.ErrMemoryNotFound) {
+			log.Printf("warning: could not inspect admin-review status for thread %s: %v", threadRoot, err)
+		}
+		return false
+	}
+	return memory != nil && memory.Status == services.MemoryStatus_AdminReview
+}
+
+// handleAdminReviewFollowUp processes a follow-up on an admin-review thread.
+// Stub: the flow is not implemented, so it reports "not handled" with no error,
+// which leaves the email for the caller's default (unread) handling.
+func handleAdminReviewFollowUp(ctx context.Context, email *services.Email, threadRoot string) (bool, error) {
+	return false, nil
+}
+
+// leaveUnreadForAdminReview leaves an escalated email unread so a human can act
+// on it. Stub: MarkUnread is not implemented in this build, so it only logs.
+func leaveUnreadForAdminReview(ctx context.Context, messageId, threadRoot string) {
+	log.Printf("email %s in thread %s would be escalated for admin review, but admin review is not implemented in this build", messageId, threadRoot)
 }
 
 // demoNoKeyNotice is the templated reply sent when the agent is running without

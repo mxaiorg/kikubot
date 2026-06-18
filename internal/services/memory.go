@@ -22,6 +22,11 @@ const (
 	MemoryStatus_Waiting  MemoryStatus = "waiting"
 	MemoryStatus_Complete MemoryStatus = "complete"
 	MemoryStatus_Error    MemoryStatus = "error"
+	// MemoryStatus_AdminReview is a stub status referenced by the pollerDeps
+	// admin-review abstraction (see cmd/kikubot/main.go). The admin-review flow
+	// is not implemented in this build, so this status is never set — it exists
+	// only so the abstraction compiles and stays close to the origin codebase.
+	MemoryStatus_AdminReview MemoryStatus = "admin_review"
 )
 
 var ErrMemoryNotFound = errors.New("memory not found")
