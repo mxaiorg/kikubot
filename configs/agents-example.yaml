@@ -89,6 +89,10 @@ agents:
     agent_timeout: 600
     whitelist: [example.com, agents.example.com]
 
+# Remote MCP servers (the ones referenced by `key` in `tools:` above — e.g.
+# mxmcp, buffer_mcp, tavily_mcp, box_mcp) are declared in their own file:
+# configs/mcp_servers.yaml (see configs/mcp_servers-example.yaml).
+
 # external:  partner agents that run on OTHER machines and/or OTHER mail
 # domains, outside this deployment. We never run them, so entries carry only
 # identity + role + description — tools, budgets, LLM and ACL settings do not

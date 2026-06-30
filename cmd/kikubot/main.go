@@ -129,6 +129,15 @@ func main() {
 	config.Apply(cfg)
 	warnUncoveredExternals(cfg)
 	services.InitDataPaths(config.InContainer)
+	tools.InitOAuthDir(config.InContainer)
+	// Register declarative remote MCP servers (configs/mcp_servers.yaml) before
+	// initAgent so their tool keys resolve when agent tools are assembled. A
+	// missing file is fine (no remote MCPs); only a parse error is fatal.
+	mcpServers, mcpErr := config.LoadMCPServers(mcpServersConfigPath())
+	if mcpErr != nil {
+		log.Fatalf("error loading mcp_servers.yaml: %v", mcpErr)
+	}
+	tools.RegisterMCPServers(mcpServers)
 	log.Printf("Agent, %s (%s), is alive!\n", config.AgentName, config.AgentEmail)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -334,7 +343,7 @@ func processNewEmails(parent context.Context, emails []services.Email, deps poll
 	}
 	var processed []string // Message-Ids to mark as seen
 	for _, email := range emails {
-		fmt.Println("NEW EMAIL:", email.MessageId)
+		log.Println("NEW EMAIL:", email.MessageId)
 		email.Senders = deps.addToSenders(email.Senders, email.From)
 
 		// Auto-replies (bounces, out-of-office) MUST NOT reach the LLM.
@@ -1085,6 +1094,24 @@ func agentsConfigPath() string {
 	// so the repo root is two levels up.
 	_, srcFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(srcFile), "..", "..", "configs", "agents.yaml")
+}
+
+// mcpServersConfigPath resolves configs/mcp_servers.yaml with the same
+// precedence as agentsConfigPath: MCP_SERVERS_CONFIG env override, then next to
+// the executable (production / Docker), then up from this source file (dev).
+func mcpServersConfigPath() string {
+	if p := os.Getenv("MCP_SERVERS_CONFIG"); p != "" {
+		return p
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		p := filepath.Join(filepath.Dir(exe), "mcp_servers.yaml")
+		if _, statErr := os.Stat(p); statErr == nil {
+			return p
+		}
+	}
+	_, srcFile, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(srcFile), "..", "..", "configs", "mcp_servers.yaml")
 }
 
 // warnUncoveredExternals logs a startup warning for each `external:` peer

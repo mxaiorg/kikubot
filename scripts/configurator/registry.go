@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"kikubot/internal/config"
 )
 
 // toolInfo is one entry in the tool registry as exposed to the dashboard.
@@ -18,6 +20,7 @@ type toolInfo struct {
 	Key         string // key in registry map (e.g. "report")
 	Description string // joined Description from all ToolDefinitions returned
 	Private     bool   // registered dynamically from internal/tools_priv (present only when private source is deployed)
+	MCP         bool   // declared in configs/mcp_servers.yaml (remote MCP server, registered at runtime — not in the static registry literal)
 }
 
 // loadToolRegistry parses internal/tools/*.go on demand and returns the
@@ -87,7 +90,27 @@ func loadToolRegistry(root string) ([]toolInfo, error) {
 		if seen[k] {
 			continue
 		}
+		seen[k] = true
 		infos = append(infos, toolInfo{Key: k, Description: privDesc[k], Private: true})
+	}
+
+	// Remote MCP servers (configs/mcp_servers.yaml) aren't in the static
+	// registry literal either — they're registered at runtime from the
+	// declarative catalog. Surface them so the picker can offer them, flagged
+	// MCP. Assigning one still requires its mcp_servers.yaml entry plus
+	// credentials (and, for oauth2, a seeded token file); the badge signals
+	// that extra setup. A missing/unreadable file just yields no MCP tools.
+	mcpServers, mcpErr := config.LoadMCPServers(filepath.Join(root, "configs", "mcp_servers.yaml"))
+	if mcpErr != nil {
+		log.Printf("configurator: cannot read mcp_servers.yaml: %v", mcpErr)
+	}
+	for _, s := range mcpServers {
+		k := strings.TrimSpace(s.Key)
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		infos = append(infos, toolInfo{Key: k, Description: s.Description, MCP: true})
 	}
 	return infos, nil
 }

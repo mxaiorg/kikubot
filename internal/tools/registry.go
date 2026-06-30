@@ -14,9 +14,7 @@ var registry = map[string]toolFactory{
 	"report":               wrap(ReportTool),
 	"report_strict":        wrap(ReportStrictTool),
 	"snooze":               SnoozeTools,
-	"mxmcp":                MxMCP,
 	"salesforce_mcp":       SalesforceMCP,
-	"buffer_mcp":           BufferMCP,
 	"anthropic_web_search": wrap(AnthropicWebSearch),
 	"wordpress":            WordPressTool,
 	"helpjuice":            HelpjuiceTools,
@@ -26,7 +24,6 @@ var registry = map[string]toolFactory{
 	"bash":                 wrap(BashTool),
 	"xero_mcp":             XeroMCP,
 	"xero_api":             XeroAPI,
-	"tavily_mcp":           TavilyMCP,
 	"vimeo":                Vimeo,
 	"nuki":                 Nuki,
 	"supabase":             Supabase,
@@ -66,10 +63,7 @@ func Register(key string, factory func() []ToolDefinition, description string) {
 // configurator dashboard reads this map to populate chip tooltips. Update
 // when adding a new MCP-style factory or when its scope shifts.
 var registryDescriptions = map[string]string{
-	"mxmcp":          "mxHERO Mail2Cloud Advanced — searches and retrieves email across an organization's archived email accounts.",
 	"salesforce_mcp": "Salesforce CRM — query and update accounts, contacts, opportunities, leads, and other Salesforce records.",
-	"buffer_mcp":     "Buffer social media — draft, schedule, and publish posts across connected social channels.",
-	"tavily_mcp":     "Tavily web search — runs web searches and returns extracted content for downstream reasoning.",
 	"vimeo":          "List Vimeo video library: descriptions, links, etc.",
 	"xero_mcp":       "Xero accounting via the upstream xero-mcp-server (Custom Connection apps; AU/NZ/UK/US only).",
 	"xero_api":       "Xero accounting via direct REST (WebApp OAuth, works anywhere). Currently exposes invoices and contacts. Run cmd/xero-bootstrap once to seed the refresh token.",

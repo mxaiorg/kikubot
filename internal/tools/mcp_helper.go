@@ -130,14 +130,10 @@ func LocalMCPBridge(cfg LocalMCPConfig) ([]ToolDefinition, error) {
 // as a ToolDefinition that the cluster can route to individual agents.
 
 // mcpDial creates a new MCP Streamable HTTP client, initializes the session,
-// and returns the ready-to-use client. Caller must close it when done.
-func mcpDial(serverURL, auth string) (*mcpclient.Client, error) {
-	var opts []transport.StreamableHTTPCOption
-	if auth != "" {
-		opts = append(opts, transport.WithHTTPHeaders(map[string]string{
-			"Authorization": auth,
-		}))
-	}
+// and returns the ready-to-use client. Caller must close it when done. The
+// option funcs (headers, OAuth, …) are reusable across dials, so the same set
+// is applied to both the discovery dial and every per-call dial.
+func mcpDial(serverURL string, opts ...transport.StreamableHTTPCOption) (*mcpclient.Client, error) {
 	c, err := mcpclient.NewStreamableHttpClient(serverURL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
@@ -149,12 +145,46 @@ func mcpDial(serverURL, auth string) (*mcpclient.Client, error) {
 	return c, nil
 }
 
-// MCPBridge connects to an MCP server, discovers its scripts, and returns them
-// as ToolDefinitions. Each tool call opens a fresh session to avoid stale
-// connection / canceled-context errors from the Streamable HTTP transport.
+// MCPBridge connects to an MCP server using a static Authorization header (or
+// none, when auth is ""), discovers its scripts, and returns them as
+// ToolDefinitions. Thin wrapper over mcpBridgeWithOpts.
 func MCPBridge(serverName, serverURL, auth string) ([]ToolDefinition, error) {
+	var headers map[string]string
+	if auth != "" {
+		headers = map[string]string{"Authorization": auth}
+	}
+	return MCPBridgeHeaders(serverName, serverURL, headers)
+}
+
+// MCPBridgeHeaders connects to an MCP server, sending a fixed set of static
+// request headers on every call. This generalises MCPBridge beyond the
+// Authorization header so servers that authenticate with an arbitrary header
+// (e.g. "X-Api-Key: <key>") are supported. An empty/nil map sends no extra
+// headers.
+func MCPBridgeHeaders(serverName, serverURL string, headers map[string]string) ([]ToolDefinition, error) {
+	var opts []transport.StreamableHTTPCOption
+	if len(headers) > 0 {
+		opts = append(opts, transport.WithHTTPHeaders(headers))
+	}
+	return mcpBridgeWithOpts(serverName, serverURL, opts...)
+}
+
+// MCPBridgeOAuth connects to an MCP server that authenticates with OAuth2. The
+// mcp-go OAuthHandler (wired in via WithHTTPOAuth) injects the Authorization
+// header on every request and transparently refreshes the access token —
+// rotating and persisting the refresh token through cfg.TokenStore (a
+// FileTokenStore here). We supply no refresh logic of our own.
+func MCPBridgeOAuth(serverName, serverURL string, cfg transport.OAuthConfig) ([]ToolDefinition, error) {
+	return mcpBridgeWithOpts(serverName, serverURL, transport.WithHTTPOAuth(cfg))
+}
+
+// mcpBridgeWithOpts connects to an MCP server, discovers its scripts, and
+// returns them as ToolDefinitions. Each tool call opens a fresh session to
+// avoid stale connection / canceled-context errors from the Streamable HTTP
+// transport.
+func mcpBridgeWithOpts(serverName, serverURL string, dialOpts ...transport.StreamableHTTPCOption) ([]ToolDefinition, error) {
 	// One-shot connection just to discover available scripts
-	c, err := mcpDial(serverURL, auth)
+	c, err := mcpDial(serverURL, dialOpts...)
 	if err != nil {
 		log.Printf("error connecting to MCP server %s: %s", serverURL, err)
 		return nil, fmt.Errorf("mcp connect %s: %w", serverName, err)
@@ -183,7 +213,7 @@ func MCPBridge(serverName, serverURL, auth string) ([]ToolDefinition, error) {
 
 				// Fresh connection per call — the Streamable HTTP transport's
 				// internal session/SSE context can go stale between calls.
-				cli, dialErr := mcpDial(serverURL, auth)
+				cli, dialErr := mcpDial(serverURL, dialOpts...)
 				if dialErr != nil {
 					log.Printf("error dialing MCP for tool %s: %s", tool.Name, dialErr)
 					return "", dialErr

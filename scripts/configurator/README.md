@@ -8,7 +8,7 @@ It edits these files:
 - **`configs/secrets.env`** — LLM API keys, per-agent mailbox passwords (`<UPPER_STEM>_EMAIL_PASSWORD`), and tool credentials.
 - **`configs/knowledge/`** — the per-agent and shared markdown knowledge base (see below).
 
-Whenever an agent is added or edited, the configurator also regenerates `docker-compose.yml` from the roster so the running set of containers stays aligned. Access control (whitelist or blacklist), tool selection, and the optional bundled docker-mailserver sidecar are all editable from the same UI. Tools backed by local-only source (see [private tools](../../internal/tools/README.md#private-tools-internaltools_priv)) are shown with a **private** badge in the tool picker.
+Whenever an agent is added or edited, the configurator also regenerates `docker-compose.yml` from the roster so the running set of containers stays aligned. Access control (whitelist or blacklist), tool selection, and the optional bundled docker-mailserver sidecar are all editable from the same UI. Tools backed by local-only source (see [private tools](../../internal/tools/README.md#private-tools-internaltools_priv)) are shown with a **private** badge in the tool picker. Tools backed by a remote MCP server (declared in `configs/mcp_servers.yaml`) are shown with an **MCP** badge — selecting one assigns the key to the agent, but the server entry and its credentials (and, for OAuth2, the seeded token file) must exist for the tool to work at runtime.
 
 ### Knowledge editor
 

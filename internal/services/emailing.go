@@ -107,7 +107,7 @@ func (e *Email) GetThreadRoot() string {
 }
 
 func (e *Email) MarshalJSON() ([]byte, error) {
-	//log.Println("email:", e.Subject)
+	log.Println("email:", e.Subject)
 	type EmailAlias Email
 	jsonObj, err := json.Marshal((*EmailAlias)(e))
 	if err != nil {

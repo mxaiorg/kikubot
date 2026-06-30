@@ -245,6 +245,8 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 					continue
 				}
 
+				log.Printf("  🔧 %s calling tool: %s", a.cfg.ID, block.Name)
+
 				result, execErr := td.Execute(ctx, block.Input)
 				isError := execErr != nil
 				if isError {

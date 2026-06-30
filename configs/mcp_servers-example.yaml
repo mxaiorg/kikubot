@@ -1,0 +1,55 @@
+# mcp_servers.yaml — the remote (Streamable HTTP) MCP integration catalog,
+# loaded independently of agents.yaml. Each entry is exposed to agents by `key`:
+# an agent gets the server by listing that key in its `tools:` (over in
+# agents.yaml). Adding a server is config-only — no new Go.
+#
+# Resolution order (same as agents.yaml): the MCP_SERVERS_CONFIG env var, then
+# mcp_servers.yaml next to the executable (Docker), then configs/mcp_servers.yaml
+# from the source tree (dev). A missing file just means "no remote MCPs".
+#
+# auth modes:
+#   none    — no Authorization header.
+#   bearer  — static header "<scheme> <token>"; scheme defaults to "Bearer".
+#             token_env names the secrets.env var holding the token.
+#   apikey  — static header for ApiKey-style auth. Defaults to
+#             "Authorization: ApiKey <token>". Set `header:` (e.g. X-Api-Key)
+#             for servers that want the key in a separate header (raw token, no
+#             scheme); set `scheme:` to override the prefix.
+#   oauth2  — OAuth2 with automatic access-token refresh handled by mcp-go.
+#             client_id_env / client_secret_env name the app-credential vars.
+#             The access+refresh pair is hand-seeded once into a token file at
+#             oauth/<key>.json (dev) or data/oauth/<key>.json (container) — a
+#             JSON object {access_token, token_type:"Bearer", refresh_token,
+#             expires_at}. kikubot rotates and rewrites it on every refresh, so
+#             the (single-use) refresh token survives restarts. Set expires_at
+#             in the past to force a refresh on the first call.
+#             metadata_url optionally pins the OAuth server metadata endpoint
+#             if discovery from the MCP url fails.
+mcp_servers:
+  - key: mxmcp
+    url: https://lab4-mcp.example.com/mcp2/connect
+    auth: apikey            # sends "Authorization: ApiKey <token>"
+    token_env: MXMCP_API_KEY
+    description: "mxHERO Mail2Cloud Advanced — searches and retrieves archived email."
+  # Example of an MCP that wants the key in its own header instead:
+  # - key: acme_mcp
+  #   url: https://mcp.acme.example.com
+  #   auth: apikey
+  #   header: X-Api-Key      # → "X-Api-Key: <token>" (raw, no scheme)
+  #   token_env: ACME_API_KEY
+  - key: buffer_mcp
+    url: https://mcp.buffer.com/mcp
+    auth: bearer
+    token_env: BUFFER_API_KEY
+    description: "Buffer social media — draft, schedule, and publish posts."
+  - key: tavily_mcp
+    url: https://mcp.tavily.com/mcp
+    auth: bearer
+    token_env: TAVILY_API_KEY
+    description: "Tavily web search — runs web searches and returns extracted content."
+  - key: box_mcp
+    url: https://mcp.box.com
+    auth: oauth2
+    client_id_env: BOX_CLIENT_ID
+    client_secret_env: BOX_CLIENT_SECRET
+    description: "Box content management via the official Box MCP server (OAuth2)."

@@ -106,11 +106,53 @@ type CommonConfig struct {
 	DisabledTools           []string `yaml:"disabled_tools,flow,omitempty"`
 }
 
+// MCPServer is one entry under `mcp_servers:` — a remote (Streamable HTTP) MCP
+// server exposed to agents as a tool key. The table is the declarative seam for
+// adding remote MCPs: a new server is a YAML row (plus, for oauth2, a hand-seeded
+// token file), never new Go. RegisterMCPServers turns each entry into a registry
+// factory keyed by Key, so an agent gets the server by listing Key in its
+// `tools:`.
+//
+// Auth modes (all static modes read the secret from TokenEnv at startup and
+// send it in a fixed request header; Header defaults to "Authorization"):
+//   - "none"   — no auth header.
+//   - "bearer" — header value "<Scheme> <token>"; Scheme defaults to "Bearer".
+//   - "apikey" — same static-header mechanism, but Scheme defaults to "ApiKey"
+//     when the header is Authorization (e.g. mxMCP wants "Authorization: ApiKey
+//     <token>"), and defaults to empty (raw token) when a custom Header is set
+//     (e.g. "X-Api-Key: <token>"). Set Scheme explicitly to override either.
+//   - "oauth2" — OAuth2 authorization-code tokens with automatic refresh handled
+//     by the mcp-go OAuth handler. ClientIDEnv/ClientSecretEnv supply the app
+//     credentials; the access+refresh pair lives in a hand-seeded
+//     data/oauth/<Key>.json (a serialised mcp-go transport.Token) which kikubot
+//     rotates and rewrites on every refresh. MetadataURL optionally pins the
+//     OAuth server metadata endpoint when discovery from URL doesn't work.
+type MCPServer struct {
+	Key             string `yaml:"key"`
+	URL             string `yaml:"url"`
+	Auth            string `yaml:"auth,omitempty"` // none | bearer | apikey | oauth2 (default none)
+	Header          string `yaml:"header,omitempty"`
+	Scheme          string `yaml:"scheme,omitempty"`
+	TokenEnv        string `yaml:"token_env,omitempty"`
+	ClientIDEnv     string `yaml:"client_id_env,omitempty"`
+	ClientSecretEnv string `yaml:"client_secret_env,omitempty"`
+	MetadataURL     string `yaml:"metadata_url,omitempty"`
+	Description     string `yaml:"description,omitempty"`
+}
+
 // AgentsConfig is the deserialised contents of configs/agents.yaml.
 type AgentsConfig struct {
 	Common   CommonConfig    `yaml:"common"`
 	Agents   []AgentDef      `yaml:"agents"`
 	External []ExternalAgent `yaml:"external,omitempty"`
+}
+
+// MCPServersConfig is the deserialised contents of configs/mcp_servers.yaml —
+// the declarative table of remote MCP servers, kept in its own file so the
+// agent roster (agents.yaml) and the remote-integration catalog evolve
+// independently.
+type MCPServersConfig struct {
+	MCPServers []MCPServer `yaml:"mcp_servers"`
 }
 
 // Load reads and parses an agents YAML file. Returns (nil, nil) when the
@@ -128,6 +170,24 @@ func Load(path string) (*AgentsConfig, error) {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return &cfg, nil
+}
+
+// LoadMCPServers reads and parses an mcp_servers YAML file. Returns (nil, nil)
+// when the file does not exist — a deployment may simply declare no remote MCP
+// servers, which is not an error.
+func LoadMCPServers(path string) ([]MCPServer, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var cfg MCPServersConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	return cfg.MCPServers, nil
 }
 
 // FindAgent returns the agent definition matching the given email, or nil.

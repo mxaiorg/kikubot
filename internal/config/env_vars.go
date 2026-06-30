@@ -54,8 +54,6 @@ var (
 	WebSiteUrl        string
 	WordPressUser     string
 	WordPressPassword string
-	// BufferAPIKey part after "Bearer"
-	BufferAPIKey string
 	// XeroConfig
 	XeroClientId     string
 	XeroClientSecret string
@@ -64,10 +62,6 @@ var (
 	HelpjuiceAccount string
 	// Tika: File to Text
 	TikaUrl string
-	// mxMCP API Key
-	MxMcpApiKey string
-	// Tavily API Key
-	TavilyApiKey string
 	// Vimeo API Key
 	VimeoApiKey string
 	// Nuki API Token (smart lock — account user + smartlock auth management)
@@ -226,14 +220,11 @@ func Apply(cfg *AgentsConfig) {
 	WebSiteUrl = os.Getenv("WEBSITE_URL")
 	WordPressUser = os.Getenv("WORDPRESS_USER")
 	WordPressPassword = os.Getenv("WORDPRESS_PASSWORD")
-	BufferAPIKey = os.Getenv("BUFFER_API_KEY")
 	XeroClientId = os.Getenv("XERO_CLIENT_ID")
 	XeroClientSecret = os.Getenv("XERO_CLIENT_SECRET")
 	HelpjuiceAPIKey = os.Getenv("HELPJUICE_API_KEY")
 	HelpjuiceAccount = os.Getenv("HELPJUICE_ACCOUNT")
 	TikaUrl = GetEnvWithoutQuotesSafe("TIKA_URL", "http://localhost:9998")
-	MxMcpApiKey = os.Getenv("MXMCP_API_KEY")
-	TavilyApiKey = os.Getenv("TAVILY_API_KEY")
 	VimeoApiKey = os.Getenv("VIMEO_API_KEY")
 	NukiApiToken = os.Getenv("NUKI_API_TOKEN")
 	SupabaseUrl = os.Getenv("SUPABASE_URL")

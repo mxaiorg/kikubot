@@ -535,6 +535,7 @@ var templateFuncs = template.FuncMap{
 	"join":             strings.Join,
 	"toolsDataAttr":    toolsDataAttr,
 	"privateToolsAttr": privateToolsAttr,
+	"mcpToolsAttr":     mcpToolsAttr,
 	"infoIcon":         infoIcon,
 	"add":              func(a, b int) int { return a + b },
 }
@@ -546,6 +547,20 @@ func privateToolsAttr(infos []toolInfo) string {
 	var keys []string
 	for _, t := range infos {
 		if t.Private {
+			keys = append(keys, t.Key)
+		}
+	}
+	return strings.Join(keys, ",")
+}
+
+// mcpToolsAttr returns a comma-separated list of the registry keys that are
+// backed by a remote MCP server (declared in configs/mcp_servers.yaml). The
+// chip UI uses it to badge those tools so the operator knows the key needs a
+// catalog entry plus credentials, not just selection.
+func mcpToolsAttr(infos []toolInfo) string {
+	var keys []string
+	for _, t := range infos {
+		if t.MCP {
 			keys = append(keys, t.Key)
 		}
 	}

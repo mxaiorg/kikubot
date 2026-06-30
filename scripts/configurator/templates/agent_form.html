@@ -85,7 +85,7 @@
       </label>
       <div class="full">
         <label><span class="field-label">Tools {{infoIcon "The tools this agent can use."}}</span></label>
-        <div class="chips" data-chip-input data-tools="{{toolsDataAttr .Registry}}" data-private-tools="{{privateToolsAttr .Registry}}" data-provider-source="agent-provider">
+        <div class="chips" data-chip-input data-tools="{{toolsDataAttr .Registry}}" data-private-tools="{{privateToolsAttr .Registry}}" data-mcp-tools="{{mcpToolsAttr .Registry}}" data-provider-source="agent-provider">
           <div class="warn-banner is-hidden" data-tool-warning>⚠️ <code>anthropic_web_search</code> tool is not available for openrouter</div>
           <input type="hidden" name="tools" value="{{join .Tools ","}}">
           <div class="chips-list"></div>
