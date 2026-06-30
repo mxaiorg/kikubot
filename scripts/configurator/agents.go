@@ -322,16 +322,18 @@ func loadCommonDefaults(root string) (*commonDefaults, error) {
 // saveCommonDefaults persists the form: knob values into agents.yaml's
 // common: block, API keys into secrets.env.
 func saveCommonDefaults(root string, d *commonDefaults) error {
+	if strings.TrimSpace(d.EmailServer) == "" {
+		return fmt.Errorf("EMAIL_SERVER is required")
+	}
+	if strings.TrimSpace(d.SMTPServer) == "" {
+		return fmt.Errorf("SMTP_SERVER is required")
+	}
 	r, err := loadRoster(root)
 	if err != nil {
 		return err
 	}
-	if v := strings.TrimSpace(d.EmailServer); v != "" {
-		r.Common.EmailServer = ensurePort(v, "993")
-	}
-	if v := strings.TrimSpace(d.SMTPServer); v != "" {
-		r.Common.SmtpServer = ensurePort(v, "587")
-	}
+	r.Common.EmailServer = ensurePort(strings.TrimSpace(d.EmailServer), "993")
+	r.Common.SmtpServer = ensurePort(strings.TrimSpace(d.SMTPServer), "587")
 	r.Common.EmailInsecureTLS = d.EmailInsecureTLS
 	if v := strings.TrimSpace(d.MaxHistoryChars); v != "" {
 		if n, parseErr := strconv.Atoi(v); parseErr == nil && n > 0 {

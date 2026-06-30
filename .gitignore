@@ -2,6 +2,7 @@
 /services/dms/certs/privkey.pem
 /configs/secrets.env
 /configs/agents.yaml
+/configs/mcp_servers.yaml
 # Demo: the example is committed; the copied live secrets file is not.
 /configs/demo/secrets.env
 /services/dms/maildata/
