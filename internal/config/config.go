@@ -46,6 +46,7 @@ type AgentDef struct {
 	MaxTokens              *int     `yaml:"max_tokens,omitempty" json:"-"`
 	MaxTurns               *int     `yaml:"max_turns,omitempty" json:"-"`
 	MaxToolResultChars     *int     `yaml:"max_tool_result_chars,omitempty" json:"-"`
+	ToolResultSpillChars   *int     `yaml:"tool_result_spill_chars,omitempty" json:"-"`
 	MaxEmailRetries        *int     `yaml:"max_email_retries,omitempty" json:"-"`
 	MaxMessageBodyChars    *int     `yaml:"max_message_body_chars,omitempty" json:"-"`
 	AgentTimeout           *int     `yaml:"agent_timeout,omitempty" json:"-"`
@@ -97,6 +98,7 @@ type CommonConfig struct {
 	MaxTokens               int      `yaml:"max_tokens,omitempty"`
 	MaxTurns                int      `yaml:"max_turns,omitempty"`
 	MaxToolResultChars      *int     `yaml:"max_tool_result_chars,omitempty"`
+	ToolResultSpillChars    *int     `yaml:"tool_result_spill_chars,omitempty"`
 	MaxEmailRetries         int      `yaml:"max_email_retries,omitempty"`
 	MaxMessageBodyChars     int      `yaml:"max_message_body_chars,omitempty"`
 	AgentTimeout            int      `yaml:"agent_timeout,omitempty"`

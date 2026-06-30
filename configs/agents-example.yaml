@@ -19,6 +19,15 @@ common:
   agent_timeout: 300
   max_turns: 20
 
+  # Bulk tool results are spilled to a temp file once they exceed this many
+  # chars, and the model is handed the path so it can forward the data as a
+  # message_tool attachment (attachments[].path) instead of re-emitting every
+  # byte through its own output (which truncates mid-stream and burns the turn
+  # budget on retries). Keep this below max_tool_result_chars (default 80000)
+  # so a large-but-untruncated result — e.g. a 500-row query dump — still gets
+  # a path. Default 16000; set 0 to disable spilling.
+  tool_result_spill_chars: 16000
+
   # Stuck-task watchdog. When an agent sets a task to "waiting" (e.g. after
   # delegating to a coworker), re-wake it after this many minutes if the thread
   # is still waiting — so a delegate that never replies doesn't hang the task

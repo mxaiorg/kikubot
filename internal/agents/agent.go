@@ -12,6 +12,7 @@ import (
 	"kikubot/internal/tools"
 	"log"
 	netmail "net/mail"
+	"os"
 	"strings"
 	"sync"
 
@@ -253,11 +254,34 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 					result = execErr.Error()
 				}
 
+				// Spill large successful results to disk so the model can
+				// forward them by path. A sizeable result (e.g. a multi-hundred-
+				// row query dump) can only reach a coworker as an attachment; if
+				// the bytes live solely in the conversation the model is forced
+				// to re-emit them through its own output, which truncates
+				// mid-stream and burns the turn budget. Persisting the FULL bytes
+				// to a path the model can hand to message_tool's
+				// attachments[].path removes that dependency. Fires independently
+				// of truncation so a large-but-untruncated result still gets a
+				// path; the path note is appended AFTER truncation so it can
+				// never itself be clipped.
 				original := len(result)
+				var spillPath string
+				if !isError && config.ToolResultSpillChars > 0 && original > config.ToolResultSpillChars {
+					if p, ok := spillToolResult(a.cfg.ID, block.Name, result); ok {
+						spillPath = p
+						log.Printf("  💾 %s: spilled %s result (%d chars) to %s",
+							a.cfg.ID, block.Name, original, p)
+					}
+				}
+
 				result = truncateToolResult(result, config.MaxToolResultChars)
 				if len(result) < original {
 					log.Printf("  ✂️  %s: truncated %s result %d → %d chars",
 						a.cfg.ID, block.Name, original, len(result))
+				}
+				if spillPath != "" {
+					result += toolResultSpillNote(original, spillPath)
 				}
 
 				toolResults = append(toolResults, a.provider.NewToolResult(block.ID, result, isError))
@@ -668,6 +692,68 @@ func truncateToolResult(result string, maxChars int) string {
 		budget--
 	}
 	return result[:budget] + marker
+}
+
+// spillToolResult persists the full (untruncated) bytes of an oversized tool
+// result to a temp file and returns its path. The file shares os.TempDir()
+// with download_file / save_attachment, so the path is directly usable as a
+// message_tool attachments[].path. Returns ("", false) on any IO error — the
+// caller treats a failed spill as "no path available" and proceeds with the
+// in-context (truncated) result, exactly as before this feature existed.
+func spillToolResult(agentID, toolName, full string) (string, bool) {
+	pattern := fmt.Sprintf("kikubot-%s-%s-*.txt",
+		sanitizeForFilename(agentID), sanitizeForFilename(toolName))
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		log.Printf("  ⚠️  %s: could not create spill file for %s result: %s", agentID, toolName, err)
+		return "", false
+	}
+	defer f.Close()
+	if _, err := f.WriteString(full); err != nil {
+		log.Printf("  ⚠️  %s: could not write spill file %s: %s", agentID, f.Name(), err)
+		return "", false
+	}
+	return f.Name(), true
+}
+
+// toolResultSpillNote is the guidance appended to a spilled result's in-context
+// copy. It points the model at the on-disk path and steers it toward the
+// path-based attach route (never re-emitting the bytes inline, which truncates).
+func toolResultSpillNote(fullLen int, path string) string {
+	return fmt.Sprintf(
+		"\n\n[The FULL untruncated result (%d chars) was saved to disk at:\n  %s\n"+
+			"To send this result to a coworker, attach the FILE — pass this exact "+
+			"path as message_tool attachments[].path (set a descriptive `name` like "+
+			"report.csv). Do NOT paste the result text into the message body or into "+
+			"attachments[].content: large inline payloads exceed the output limit and "+
+			"truncate mid-stream. If you only need part of it, read the file with "+
+			"bash_exec.]", fullLen, path)
+}
+
+// sanitizeForFilename reduces an arbitrary identifier to a safe temp-file stem:
+// lowercased, with any non-alphanumeric run collapsed to a single dash. Keeps
+// the agent/tool name recognizable in os.TempDir() without risking path
+// traversal or odd characters in the CreateTemp pattern.
+func sanitizeForFilename(s string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		out = "result"
+	}
+	return out
 }
 
 // sanitizeTruncatedToolInputs walks resp.Content and replaces any tool_use

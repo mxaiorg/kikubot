@@ -49,6 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `parseMCPInput` tolerates empty input (`{}`) — OpenRouter occasionally truncates streamed tool-call args mid-stream.
 - **`ToolDefinition`** can contribute `StaticSystem` (cacheable) or `System(email) → string` (volatile) to the prompt.
 - **Tool result truncation** — `MaxToolResultChars` clamps each result, preserving UTF-8 boundaries and appending a marker. `0` (default) = no limit.
+- **Tool result spill-to-disk** (`spillToolResult` in `agent.go`) — `ToolResultSpillChars` (default 16000; `0` disables) is a threshold *below* `MaxToolResultChars`: when a successful tool result exceeds it, `HandleMessage` writes the **full untruncated bytes** to a temp file (`os.TempDir()`, same dir as `download_file`/`save_attachment`) and appends a `[The FULL untruncated result … was saved to disk at: <path>]` note to the in-context copy. This exists so the model can forward bulk data (a 500-row query dump, a long log) by handing the path to `message_tool` `attachments[].path` instead of re-emitting every byte through its own output — which truncates mid-stream and burns the turn budget. The note is appended **after** truncation so the path can never be clipped; a failed spill degrades silently to the old truncate-only behaviour.
 
 ### Services (`internal/services/`)
 
@@ -74,7 +75,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Never trim the anchor.** When changing `trimHistory`, preserve the invariant that the most recent human-authored user message stays in the trimmed tail.
 - **`ErrMaxTurns` is non-retryable.** Don't re-queue on it; notify the sender and mark seen, otherwise coordinator agents loop forever.
 - **A `waiting` thread must have a way to resume.** Setting status `waiting` arms the watchdog (when enabled) so a never-answered delegate can't black-hole a task. If you add new code that parks a thread waiting on an external reply, make sure either an inbound reply or the watchdog can re-wake it — never leave `waiting` as a terminal state with no timer.
-- **Attach files by `path`, not inlined base64.** When a tool needs to send a file it fetched/saved (`download_file`, `save_attachment`, `bash_exec`), pass the local path to `message_tool`'s `attachments[].path`. Inlining large base64 into tool args truncates mid-stream — the failure that silently dropped the JFE flag attachment.
+- **Attach files by `path`, not inlined base64.** When a tool needs to send a file it fetched/saved (`download_file`, `save_attachment`, `bash_exec`, or a large tool result spilled by `ToolResultSpillChars`), pass the local path to `message_tool`'s `attachments[].path`. Inlining large base64 into tool args truncates mid-stream — the failure that silently dropped the JFE flag attachment, and the same failure that forced a coordinator's 500-row Salesforce report through three truncated retries before a re-poll happened to land under the limit.
 - **MCP `parseMCPInput` tolerates `{}`** — leave the empty-input path alone unless you've confirmed the upstream provider behaviour has changed.
 - **History persistence uses `param.Override`** to bypass SDK re-serialisation; if you change the memory format, keep this wrapper.
 

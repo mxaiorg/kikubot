@@ -45,10 +45,17 @@ var (
 	MaxTokens              int
 	MaxHistoryChars        int // max total chars in serialized conversation history (0 = unlimited)
 	MaxToolResultChars     int // max chars per individual tool result (0 = unlimited)
-	MaxEmailRetries        int // max times an inbound email can be left unseen before we give up and bounce
-	MaxMessageBodyChars    int // soft cap on inline email body length; bulk content must use attachments (0 = unlimited)
-	InboxFolder            string
-	SentFolder             string
+	// ToolResultSpillChars is the size, in chars, above which a tool result is
+	// persisted to a temp file so the model can forward it by path
+	// (message_tool attachments[].path) instead of re-emitting the bytes
+	// through its own truncation-prone output. Should sit below
+	// MaxToolResultChars so large-but-untruncated results still get a path.
+	// 0 = disabled.
+	ToolResultSpillChars int
+	MaxEmailRetries      int // max times an inbound email can be left unseen before we give up and bounce
+	MaxMessageBodyChars  int // soft cap on inline email body length; bulk content must use attachments (0 = unlimited)
+	InboxFolder          string
+	SentFolder           string
 
 	// WebSiteUrl WordPressConfig
 	WebSiteUrl        string
@@ -211,6 +218,18 @@ func Apply(cfg *AgentsConfig) {
 	}
 	if agent != nil && agent.MaxToolResultChars != nil {
 		MaxToolResultChars = *agent.MaxToolResultChars
+	}
+
+	// ToolResultSpillChars: 0 is a meaningful "disabled" value, so resolve it
+	// with the same pointer-at-every-level pattern as MaxToolResultChars.
+	// Default sits below MaxToolResultChars so a large-but-untruncated result
+	// (e.g. an ~80KB query dump) still gets persisted to disk and a path.
+	ToolResultSpillChars = 16000 // default
+	if common.ToolResultSpillChars != nil {
+		ToolResultSpillChars = *common.ToolResultSpillChars
+	}
+	if agent != nil && agent.ToolResultSpillChars != nil {
+		ToolResultSpillChars = *agent.ToolResultSpillChars
 	}
 
 	InboxFolder = GetEnvWithoutQuotesSafe("INBOX_FOLDER", "INBOX")

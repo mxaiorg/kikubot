@@ -32,7 +32,7 @@ import (
 //       the lock or shown in the Nuki mobile app. Use nuki_list_smartlocks (or
 //       agent Knowledge) to discover the correct integer id, or use this bash command:
 //
-// TOKEN=$(grep -E '^NUKI_API_TOKEN=' configs/secrets-private.env | cut -d= -f2-) \
+// TOKEN=$(grep -E '^NUKI_API_TOKEN=' configs/secrets.env | cut -d= -f2-) \
 // curl -s https://api.nuki.io/smartlock \
 //  -H "Authorization: Bearer $TOKEN" \
 //  | jq '.[] | {smartlockId, name, nukiId}'
