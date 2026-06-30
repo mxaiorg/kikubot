@@ -1,12 +1,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,6 +52,7 @@ func BoxCLI() []ToolDefinition {
 		boxFileGetTool(cfg),
 		boxFolderListTool(cfg),
 		boxFileDownloadTool(cfg),
+		boxFileUploadTool(cfg),
 		boxReadTextTool(cfg),
 		boxSharedItemGetTool(cfg),
 	}
@@ -429,6 +432,213 @@ func boxDownloadViaHTTP(cfg CLIToolConfig, fileID, sharedLink, password, asUser,
 		return "", fmt.Errorf("writing file: %w", err)
 	}
 	return destPath, nil
+}
+
+// ── box__file_upload ────────────────────────────────────────────────────
+
+func boxFileUploadTool(cfg CLIToolConfig) ToolDefinition {
+	return ToolDefinition{
+		Name: "box__file_upload",
+		Description: "Upload a local file to a Box folder and return the new Box file's id, name, and shared link info. " +
+			"Pass the local path of a file you saved with save_attachment or box__file_download (or produced with " +
+			"bash_exec). Use as_user to upload on behalf of an enterprise user — e.g. into a folder owned by that user " +
+			"that the service account doesn't collaborate on. If a file of the same name already exists in the folder, " +
+			"a new version is uploaded instead of failing.",
+		InputSchema: []byte(`{
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string",
+					"description": "Local filesystem path of the file to upload (e.g. the \"path\" returned by save_attachment or box__file_download)."
+				},
+				"parent_folder_id": {
+					"type": "string",
+					"description": "The Box folder ID to upload into (use '0' for the root folder)."
+				},
+				"name": {
+					"type": "string",
+					"description": "Optional name to give the file in Box. Defaults to the local file's base name."
+				},
+				"as_user": {
+					"type": "string",
+					"description": "Optional Box user ID to act as (the numeric created_by.id of the folder owner, not an email). The service account impersonates that user to upload into a folder it doesn't otherwise collaborate on."
+				}
+			},
+			"required": ["path", "parent_folder_id"]
+		}`),
+		Execute: func(_ context.Context, input json.RawMessage) (string, error) {
+			var p struct {
+				Path           string `json:"path"`
+				ParentFolderID string `json:"parent_folder_id"`
+				Name           string `json:"name"`
+				AsUser         string `json:"as_user"`
+			}
+			if err := json.Unmarshal(input, &p); err != nil {
+				return "", fmt.Errorf("parsing input: %w", err)
+			}
+			if p.Path == "" {
+				return "", fmt.Errorf("path is required")
+			}
+			if p.ParentFolderID == "" {
+				return "", fmt.Errorf("parent_folder_id is required (use '0' for the root folder)")
+			}
+
+			name := p.Name
+			if name == "" {
+				name = filepath.Base(p.Path)
+			}
+
+			return boxUploadViaHTTP(cfg, p.Path, p.ParentFolderID, name, p.AsUser)
+		},
+		StaticSystem: "- box__file_upload uploads a LOCAL file (by path) to a Box folder and returns the created file's id and " +
+			"shared link info. To send a user an attachment you received, use message_tool; use box__file_upload only " +
+			"when the file should be stored in Box.\n" +
+			"- To upload an inbound email attachment to Box, call save_attachment first to get a local path, then pass " +
+			"that path to box__file_upload along with the destination parent_folder_id.\n" +
+			"- If the folder is owned by an enterprise user the service account doesn't collaborate with, pass that " +
+			"owner's numeric user id as as_user to upload by impersonating them.\n",
+	}
+}
+
+// boxUploadViaHTTP uploads a local file to Box using the multipart content
+// endpoint. As-User context (impersonating the owning enterprise user) is
+// forwarded when set. If a file of the same name already exists in the target
+// folder (HTTP 409), the bytes are uploaded as a new version of that file
+// instead of failing. Returns a JSON summary of the created/updated file.
+func boxUploadViaHTTP(cfg CLIToolConfig, path, parentFolderID, name, asUser string) (string, error) {
+	token, err := boxAccessToken(cfg)
+	if err != nil {
+		return "", fmt.Errorf("getting box access token: %w", err)
+	}
+
+	result, status, err := boxUploadRequest(token,
+		"https://upload.box.com/api/2.0/files/content", path, name, asUser,
+		map[string]any{"name": name, "parent": map[string]string{"id": parentFolderID}})
+	if err != nil {
+		return "", err
+	}
+
+	// A name clash returns 409 with the existing file id; upload a new version
+	// to that file instead of failing outright.
+	if status == http.StatusConflict {
+		existingID := boxConflictFileID(result)
+		if existingID == "" {
+			return "", fmt.Errorf("box upload conflict for %q in folder %s but no existing file id was returned: %s",
+				name, parentFolderID, strings.TrimSpace(string(result)))
+		}
+		verURL := fmt.Sprintf("https://upload.box.com/api/2.0/files/%s/content", existingID)
+		result, status, err = boxUploadRequest(token, verURL, path, name, asUser,
+			map[string]any{"name": name})
+		if err != nil {
+			return "", err
+		}
+	}
+
+	if status != http.StatusCreated && status != http.StatusOK {
+		return "", fmt.Errorf("box upload of %q to folder %s returned HTTP %d: %s",
+			name, parentFolderID, status, strings.TrimSpace(string(result)))
+	}
+
+	return boxUploadSummary(result)
+}
+
+// boxUploadRequest streams the file at path as a multipart upload to url with
+// the given attributes, returning the response body and status code.
+func boxUploadRequest(token, url, path, name, asUser string, attributes map[string]any) ([]byte, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("opening file to upload: %w", err)
+	}
+	defer f.Close()
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+
+	attrJSON, err := json.Marshal(attributes)
+	if err != nil {
+		return nil, 0, fmt.Errorf("encoding upload attributes: %w", err)
+	}
+	if err := w.WriteField("attributes", string(attrJSON)); err != nil {
+		return nil, 0, fmt.Errorf("writing upload attributes: %w", err)
+	}
+
+	part, err := w.CreateFormFile("file", name)
+	if err != nil {
+		return nil, 0, fmt.Errorf("creating upload form file: %w", err)
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return nil, 0, fmt.Errorf("reading file to upload: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return nil, 0, fmt.Errorf("finalizing upload body: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("building upload request: %w", err)
+	}
+	// boxSetAuth handles the bearer token and As-User header; uploads never use
+	// a shared link, so pass empty values for those.
+	boxSetAuth(req, token, "", "", asUser)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("uploading file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, 0, fmt.Errorf("reading upload response: %w", err)
+	}
+	return respBody, resp.StatusCode, nil
+}
+
+// boxConflictFileID extracts the existing file id from a 409 conflict response.
+func boxConflictFileID(body []byte) string {
+	var e struct {
+		ContextInfo struct {
+			Conflicts struct {
+				ID string `json:"id"`
+			} `json:"conflicts"`
+		} `json:"context_info"`
+	}
+	if err := json.Unmarshal(body, &e); err != nil {
+		return ""
+	}
+	return e.ContextInfo.Conflicts.ID
+}
+
+// boxUploadSummary reduces the Box upload response (an entries list) to the
+// fields the model cares about.
+func boxUploadSummary(body []byte) (string, error) {
+	var resp struct {
+		Entries []json.RawMessage `json:"entries"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || len(resp.Entries) == 0 {
+		// Not the shape we expected — hand back the raw body so the model still
+		// sees what Box returned.
+		return string(body), nil
+	}
+
+	var f struct {
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		SharedLink *struct {
+			URL         string `json:"url"`
+			DownloadURL string `json:"download_url"`
+		} `json:"shared_link"`
+	}
+	if err := json.Unmarshal(resp.Entries[0], &f); err != nil {
+		return string(resp.Entries[0]), nil
+	}
+	out, _ := json.Marshal(f)
+	return string(out), nil
 }
 
 // boxAccessToken returns a service-account access token via the Box CLI.
