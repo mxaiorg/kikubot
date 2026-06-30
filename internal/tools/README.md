@@ -9,9 +9,8 @@ There are a couple helper functions to make it easier to create tools.
 - cli_helper.go - Helper functions for using command line tools
   - box_cli.go is an example of a tool that uses the cli_helper.go
 - mcp_helper.go - Helper functions for adding MCPs
-  - provides helper functions for local and remote MCPs
-    - mxmcp.go is an example of a remote MCP usage
-    - salesforce_mcp.go is an example of a local MCP usage
+  - **Local (stdio) MCP servers** are launched as a subprocess via `LocalMCPBridge`. salesforce_mcp.go is an example of a local MCP usage.
+  - **Remote (HTTP) MCP servers are config-only — no Go.** Add a row to [`configs/mcp_servers.yaml`](../../configs/mcp_servers.yaml) and reference its `key` from an agent's `tools:`. `mcp_servers.go` (`RegisterMCPServers`) turns each row into a registry factory at startup, using the shared `MCPBridge` / `MCPBridgeHeaders` / `MCPBridgeOAuth` plumbing in `mcp_helper.go`. `none` / `bearer` / `apikey` / `oauth2` (with automatic token refresh) are all supported declaratively, so there are no longer per-server Go factories (the old `mxmcp.go` / `tavily_mcp.go` / `buffer_mcp.go` / `box_mcp.go` are gone). Reach for `MCPBridge*` directly only for behaviour the table can't express. The full auth-modes reference (`none` / `bearer` / `apikey` / `oauth2`, required fields, and OAuth2 token seeding) is in the [Remote MCP servers section of the main README](../../README.md#remote-mcp-servers--configsmcp_serversyaml); the [`configs/mcp_servers-example.yaml`](../../configs/mcp_servers-example.yaml) file documents the same fields inline.
 
 Agent tools can supplement the agent's system prompt to provide additional instructions. System prompts can be static or dynamic. Dynamic system prompts take the email being processed as an input. This allows you to inject per email specific instructions into the system prompt. See `types.go` for more information.
 

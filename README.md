@@ -31,7 +31,7 @@ Kikubot turns an email account into an autonomous agent. Each running container 
 **At a glance:**
 
 - **Per-thread memory.** Each email thread is a long-running conversation; the agent's history is persisted as JSON keyed by the thread's root Message-Id.
-- **Pluggable tools.** Built-in tools cover messaging, status reporting, snoozing, and mailbox search. Optional tools include Salesforce, WordPress, Buffer, Box, Helpjuice, Tavily web search, Apache Tika file-to-text, and arbitrary local/HTTP MCP servers.
+- **Pluggable tools.** Built-in tools cover messaging, status reporting, snoozing, and mailbox search. Optional tools include Salesforce, WordPress, Buffer, Box, Helpjuice, Tavily web search, Apache Tika file-to-text, and arbitrary local/HTTP MCP servers. Remote HTTP MCP servers are declared in a YAML table (`configs/mcp_servers.yaml`) — adding one is config-only, no Go.
 - **Pluggable LLMs.** Anthropic API (default, with prompt caching) or OpenRouter (with backup-model fallback).
 - **Knowledge base.** Per-agent and shared markdown files appended to the system prompt — editable live and hot-reloaded without a rebuild.
 - **Multi-agent coordination.** Agents talk to each other via the `message_tool` core tool; coordinator agents can delegate, fan out, and snooze pending work.
@@ -151,12 +151,15 @@ git clone https://github.com/mxaiorg/kikubot
 cd kikubot
 
 # 1. Configure the roster + common defaults.
-cp configs/agents-example.yaml   configs/agents.yaml
-cp configs/secrets-example.env   configs/secrets.env
+cp configs/agents-example.yaml       configs/agents.yaml
+cp configs/mcp_servers-example.yaml  configs/mcp_servers.yaml
+cp configs/secrets-example.env       configs/secrets.env
 # Edit configs/agents.yaml: keep/edit the common: defaults (mail server,
 # prompts, budgets) and the agents: entries (identity, role, tools, optional
-# per-agent overrides). Then edit configs/secrets.env: fill in
-# ANTHROPIC_API_KEY (or OPENROUTER_API_KEY) and one
+# per-agent overrides). configs/mcp_servers.yaml holds the remote-MCP catalog
+# (mxmcp, buffer_mcp, tavily_mcp, box_mcp, …); keep the servers you want and
+# reference them by key in an agent's tools:. Then edit configs/secrets.env:
+# fill in ANTHROPIC_API_KEY (or OPENROUTER_API_KEY) and one
 # <UPPERCASED_LOCAL_PART>_EMAIL_PASSWORD per agent, plus any tool credentials.
 
 # 2. (Optional) Drop knowledge files into configs/knowledge/<agent>/*.md
@@ -229,7 +232,50 @@ The runtime selects its identity from the `AGENT_EMAIL` environment variable (in
 
 If you deploy Kikubots across multiple machines and want agents to interact between hosts, include those agents in each installation's `agents.yaml`.
 
-Tool keys are defined in [`internal/tools/registry.go`](internal/tools/registry.go). Whitelist mode is strict (every immediate sender must match). Blacklist mode is lenient (walks the full thread to catch hidden bad actors).
+Tool keys are defined in [`internal/tools/registry.go`](internal/tools/registry.go) (local tools) and in `configs/mcp_servers.yaml` (remote MCP servers — see below). Whitelist mode is strict (every immediate sender must match). Blacklist mode is lenient (walks the full thread to catch hidden bad actors).
+
+### Remote MCP servers — `configs/mcp_servers.yaml`
+
+Every remote (Streamable-HTTP) MCP server lives in a **declarative table**, kept in its own file so the integration catalog evolves independently of the agent roster. Each row becomes a tool key; an agent opts in by listing that key in its `tools:`. **Adding a remote MCP is config-only — no Go.** (Local stdio MCP servers — `salesforce_mcp`, `box_cli`, `xero_mcp` — are still wired in `registry.go`; this table is for remote HTTP servers.)
+
+```yaml
+mcp_servers:
+  # Static "Authorization: ApiKey <token>" header.
+  - key: mxmcp
+    url: https://lab4-mcp.mxhero.com/mcp2/connect
+    auth: apikey
+    token_env: MXMCP_API_KEY
+    description: "mxHERO email search across an organization's archived accounts."
+
+  # Static "Authorization: Bearer <token>" header.
+  - key: tavily_mcp
+    url: https://mcp.tavily.com/mcp
+    auth: bearer
+    token_env: TAVILY_API_KEY
+    description: "Tavily web search."
+
+  # OAuth2 with automatic token refresh.
+  - key: box_mcp
+    url: https://mcp.box.com
+    auth: oauth2
+    client_id_env: BOX_CLIENT_ID
+    client_secret_env: BOX_CLIENT_SECRET
+    description: "Box content management (official Box MCP server)."
+```
+
+**Auth modes:**
+
+| `auth` | Header sent | Required fields |
+|---|---|---|
+| `none` | _(none)_ | — |
+| `bearer` | `Authorization: Bearer <token>` | `token_env` |
+| `apikey` | `Authorization: ApiKey <token>` (default) | `token_env` |
+| `oauth2` | bearer access token, auto-refreshed | `client_id_env`, `client_secret_env` |
+
+- For `apikey`, set `header:` (e.g. `X-Api-Key`) to put the raw token in a separate header instead of `Authorization`, or `scheme:` to override the `ApiKey` prefix.
+- For `oauth2`, kikubot delegates refresh to the [mcp-go](https://github.com/mark3labs/mcp-go) OAuth handler. Hand-seed the access+refresh pair **once** into `oauth/<key>.json` (dev) or `data/oauth/<key>.json` (container, persisted volume) — a serialised `transport.Token`. kikubot rotates and rewrites it on every refresh, so the single-use refresh token survives restarts. Set `metadata_url:` to pin the OAuth server-metadata endpoint if discovery from `url` fails. Optionally set `expires_at` in the past to force a refresh on the first call.
+
+A misconfigured row (unknown `auth`, missing required field) is logged and skipped — it can't take the agent down. A valid row whose credentials are simply unset registers fine but yields no tools. Resolution order for the file: `MCP_SERVERS_CONFIG` env var → next to the binary → next to the source. A missing file just means no remote MCPs (not an error). See [`configs/mcp_servers-example.yaml`](configs/mcp_servers-example.yaml).
 
 ### Secrets — `configs/secrets.env`
 
@@ -277,8 +323,11 @@ Each integration adds its own variables to `configs/secrets.env`. The most commo
 - **`xero_mcp`** — `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`
 - **`tavily_mcp`** — `TAVILY_API_KEY`
 - **`mxmcp`** — `MXMCP_API_KEY`
-- **`box_cli`** — drop a Box JWT app config at `box_config.json` (the Dockerfile registers it during the image build)
+- **`box_mcp`** (remote Box MCP, OAuth2) — `BOX_CLIENT_ID`, `BOX_CLIENT_SECRET`, plus a hand-seeded token file at `data/oauth/box_mcp.json` (see [Remote MCP servers](#remote-mcp-servers--configsmcp_serversyaml))
+- **`box_cli`** (local Box CLI) — drop a Box JWT app config at `box_config.json` (the Dockerfile registers it during the image build)
 - **`file_text`** — `TIKA_URL` (defaults to the bundled Tika sidecar)
+
+  Note: `buffer_mcp`, `tavily_mcp`, `mxmcp`, and `box_mcp` are **remote MCP servers** declared in `configs/mcp_servers.yaml`; only their secrets live here.
 
 ## Tools
 
@@ -310,7 +359,8 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `mxmcp`                | mxHERO email-search MCP.                                                                              |
 | `wordpress`            | Read/write posts on a WordPress site.                                                                 |
 | `helpjuice`            | Read/write FAQ articles in Helpjuice.                                                                 |
-| `box_cli`              | File operations against Box via the Box CLI.                                                          |
+| `box_cli`              | File operations against Box via the local Box CLI (download/attach, read-text, shared links).         |
+| `box_mcp`              | Box content management via the official remote Box MCP server (OAuth2).                                |
 | `download`             | Fetch a URL to disk.                                                                                  |
 | `file_text`            | Convert any file to plain text via Apache Tika.                                                       |
 | `bash`                 | Execute arbitrary bash locally — full network access.                                                 |
@@ -318,6 +368,8 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 | `nuki`                 | Manage Nuki device accounts and keypad codes.                                                         |
 | `supabase`             | Supabase/PostgREST CRUD.                                                                              |
 | `weather`              | Weather API                                                                                           |
+
+> The remote-MCP keys above (`tavily_mcp`, `buffer_mcp`, `mxmcp`, `box_mcp`) are **not** in `registry.go` — they're rows in [`configs/mcp_servers.yaml`](configs/mcp_servers.yaml) registered at startup (see [Remote MCP servers](#remote-mcp-servers--configsmcp_serversyaml)). The rest are local tools from `registry.go`. Either kind is enabled the same way: list its key in an agent's `tools:`.
 
 ### Private tools
 
@@ -412,14 +464,7 @@ Most integrations don't need a hand-written `Execute`. The `tools` package provi
 
   If the MCP server ships as an npm package, also pre-install it in the Dockerfile so `npx` doesn't fetch it on first call.
 
-- **Remote MCP servers (HTTP)** → [`MCPBridge(name, url, auth)`](internal/tools/mcp_helper.go) connects to a Streamable-HTTP MCP server and proxies its tools. Example from [`tavily_mcp.go`](internal/tools/tavily_mcp.go):
-
-  ```go
-  func TavilyMCP() []ToolDefinition {
-      tools, _ := MCPBridge("tavily", "https://mcp.tavily.com/mcp", "Bearer "+os.Getenv("TAVILY_API_KEY"))
-      return tools
-  }
-  ```
+- **Remote MCP servers (HTTP)** → **don't write Go for these.** Add a row to [`configs/mcp_servers.yaml`](configs/mcp_servers.yaml) (see [Remote MCP servers](#remote-mcp-servers--configsmcp_serversyaml) above) and reference its `key` from an agent's `tools:`. `RegisterMCPServers` turns each row into a registry factory at startup using the shared `MCPBridge` / `MCPBridgeHeaders` / `MCPBridgeOAuth` plumbing in [`mcp_helper.go`](internal/tools/mcp_helper.go), so there are no per-server `TavilyMCP()` / `BoxMCP()` factories to maintain. Static-bearer, ApiKey, and OAuth2 (with auto-refresh) are all covered declaratively. Reach for `MCPBridge*` directly in Go only if you need behaviour the table can't express.
 
 - **Hand-curated CLI wrappers** → [`CLIToolConfig`](internal/tools/cli_helper.go) is the same idea as `LocalMCPBridge` but for CLIs that don't speak MCP — you author the schemas yourself and the helper handles subprocess execution, JSON-flag injection, and root-path scoping.
 
