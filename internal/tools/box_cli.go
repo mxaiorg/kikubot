@@ -160,39 +160,111 @@ func boxFileGetTool(cfg CLIToolConfig) ToolDefinition {
 
 func boxFolderListTool(cfg CLIToolConfig) ToolDefinition {
 	return ToolDefinition{
-		Name:        "box__folder_list",
-		Description: "List items (files and subfolders) in a Box folder. Use folder ID '0' for the root folder.",
+		Name: "box__folder_list",
+		Description: "List items (files and subfolders) in a Box folder. Use folder ID '0' for the root folder. " +
+			"If the folder was reached through a shared link (box__shared_item_get on a \"https://.../s/<token>\" URL " +
+			"resolved to type=folder), pass that same URL as shared_link — folders reached via a shared link are " +
+			"usually NOT directly accessible by id, so a plain list returns 'not_found'/'Ancestor folder is " +
+			"unaccessible'. Alternatively, if the folder is owned by an enterprise user, pass that owner's numeric " +
+			"user id as as_user to list it by impersonating them.",
 		InputSchema: []byte(`{
 			"type": "object",
 			"properties": {
 				"folder_id": {
 					"type": "string",
-					"description": "The Box folder ID (use '0' for root)"
+					"description": "The Box folder ID (use '0' for root). When listing a shared folder, this is the id returned by box__shared_item_get."
 				},
 				"limit": {
 					"type": "integer",
 					"description": "Max items to return (default 20)"
+				},
+				"shared_link": {
+					"type": "string",
+					"description": "The original Box shared link URL (\"https://.../s/<token>\") the folder was reached through. Required when the folder is not directly accessible by id."
+				},
+				"shared_link_password": {
+					"type": "string",
+					"description": "Password for the shared link, if it is password-protected"
+				},
+				"as_user": {
+					"type": "string",
+					"description": "Optional Box user ID to act as (the numeric created_by.id of the folder owner, not an email). The service account impersonates that user to list a folder it doesn't otherwise collaborate on."
 				}
 			},
 			"required": ["folder_id"]
 		}`),
 		Execute: func(_ context.Context, input json.RawMessage) (string, error) {
 			var p struct {
-				FolderID string `json:"folder_id"`
-				Limit    int    `json:"limit"`
+				FolderID           string `json:"folder_id"`
+				Limit              int    `json:"limit"`
+				SharedLink         string `json:"shared_link"`
+				SharedLinkPassword string `json:"shared_link_password"`
+				AsUser             string `json:"as_user"`
 			}
 			if err := json.Unmarshal(input, &p); err != nil {
 				return "", fmt.Errorf("parsing input: %w", err)
 			}
 
+			// A folder reached via a shared link (or owned by an enterprise user
+			// the service account doesn't collaborate with) is not listable by
+			// the CLI's folders:items, which can't pass the BoxApi shared_link
+			// header. Hit the items endpoint directly with the right auth
+			// context, mirroring box__file_download's shared_link/as_user path.
+			if p.SharedLink != "" || p.AsUser != "" {
+				return boxFolderItemsViaHTTP(cfg, p.FolderID, p.SharedLink, p.SharedLinkPassword, p.AsUser, p.Limit)
+			}
+
+			// NB: folders:items uses --max-items, NOT --limit (which it rejects
+			// as a nonexistent flag — unlike box__search, which does take --limit).
 			args := []string{"folders:items", p.FolderID, "--json", boxFields}
 			if p.Limit > 0 {
-				args = append(args, "--limit", fmt.Sprintf("%d", p.Limit))
+				args = append(args, "--max-items", fmt.Sprintf("%d", p.Limit))
 			}
 
 			return CLIExec(cfg, args)
 		},
+		StaticSystem: "- box__folder_list: when a folder was resolved from a shared link via box__shared_item_get, pass that " +
+			"original \"https://.../s/<token>\" URL as shared_link — listing a shared folder by id alone returns " +
+			"'not_found' / 'Ancestor folder is unaccessible'. This mirrors box__file_download.\n",
 	}
+}
+
+// boxFolderItemsViaHTTP lists a folder's items through the Box items endpoint
+// with explicit auth context the CLI can't supply: the BoxApi shared_link
+// header (link-based access) and/or the As-User header (impersonate the owning
+// enterprise user). Mirrors boxDownloadViaHTTP. Returns the raw items JSON.
+func boxFolderItemsViaHTTP(cfg CLIToolConfig, folderID, sharedLink, password, asUser string, limit int) (string, error) {
+	token, err := boxAccessToken(cfg)
+	if err != nil {
+		return "", fmt.Errorf("getting box access token: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if limit <= 0 {
+		limit = 20
+	}
+	url := fmt.Sprintf("https://api.box.com/2.0/folders/%s/items"+
+		"?fields=type,id,name,description,created_by,shared_link&limit=%d", folderID, limit)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("building request: %w", err)
+	}
+	boxSetAuth(req, token, sharedLink, password, asUser)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("listing folder items: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("box items endpoint returned HTTP %d for folder %s: %s",
+			resp.StatusCode, folderID, strings.TrimSpace(string(body)))
+	}
+	return string(body), nil
 }
 
 // ── box__shared_item_get ────────────────────────────────────────────────
@@ -246,6 +318,10 @@ func boxSharedItemGetTool(cfg CLIToolConfig) ToolDefinition {
 			"- To download a file from a shared (preview) link: first call box__shared_item_get with the " +
 			"\"https://.../s/...\" URL to resolve it to the underlying item, then take the \"id\" from the " +
 			"result and pass it to box__file_download (or box__folder_list if the resolved type is a folder).\n" +
+			"- When the resolved item is a FOLDER, pass BOTH the resolved id AND the original \"https://.../s/...\" " +
+			"URL (as shared_link) to box__folder_list. Like files, a shared folder is usually NOT listable by id " +
+			"alone — listing by id returns 'not_found' / 'Ancestor folder is unaccessible'; the shared_link " +
+			"argument is what authorizes the listing.\n" +
 			"- Before downloading, check the resolved item's \"permissions.can_download\". If it is false, the " +
 			"shared link is PREVIEW-ONLY: the binary cannot be downloaded via the API — do not try, and do not " +
 			"fall back to download_file (which would only grab the HTML preview page). If you only need the file's " +

@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -57,5 +58,58 @@ func TestSpillNoteSurvivesTruncation(t *testing.T) {
 	}
 	if !strings.Contains(final, "attachments[].path") {
 		t.Error("spill note lost its path-attach guidance")
+	}
+}
+
+// The anti-flail guard keys tool calls by name + canonical input. Calls that
+// differ only in JSON formatting or object-key order must collide (so a repeat
+// is recognized), while different tool names, arguments, or values must not.
+func TestToolCallKey(t *testing.T) {
+	same := [][2]string{
+		// key order differs
+		{`{"folder_id":"123","limit":100}`, `{"limit":100,"folder_id":"123"}`},
+		// whitespace differs
+		{`{"folder_id":"123"}`, `{ "folder_id" : "123" }`},
+		// empty/whitespace-only inputs both canonicalize to ""
+		{``, `   `},
+	}
+	for _, c := range same {
+		if a, b := toolCallKey("box__folder_list", json.RawMessage(c[0])), toolCallKey("box__folder_list", json.RawMessage(c[1])); a != b {
+			t.Errorf("expected equal keys for %q and %q, got %q vs %q", c[0], c[1], a, b)
+		}
+	}
+
+	differ := [][2]struct{ name, input string }{
+		// different argument value
+		{{"box__folder_list", `{"folder_id":"123"}`}, {"box__folder_list", `{"folder_id":"456"}`}},
+		// different tool, same input
+		{{"box__folder_list", `{"folder_id":"123"}`}, {"box__search", `{"folder_id":"123"}`}},
+		// extra argument present
+		{{"box__folder_list", `{"folder_id":"123"}`}, {"box__folder_list", `{"folder_id":"123","limit":5}`}},
+	}
+	for _, c := range differ {
+		if a, b := toolCallKey(c[0].name, json.RawMessage(c[0].input)), toolCallKey(c[1].name, json.RawMessage(c[1].input)); a == b {
+			t.Errorf("expected distinct keys for %+v and %+v, both = %q", c[0], c[1], a)
+		}
+	}
+}
+
+func TestRepeatedFailureNote(t *testing.T) {
+	note := repeatedFailureNote("box__folder_list", "cli exec box: exit status 2\nNonexistent flag: --limit")
+	if !strings.Contains(note, "box__folder_list") {
+		t.Error("note should name the blocked tool")
+	}
+	if !strings.Contains(note, "--limit") {
+		t.Error("note should surface the prior error so the model can adjust")
+	}
+
+	long := strings.Repeat("x", 2000)
+	got := repeatedFailureNote("t", long)
+	if !strings.Contains(got, "…") {
+		t.Error("note should mark the prior error as trimmed with an ellipsis")
+	}
+	// Trimmed error (≤600) + fixed template, well under the 2000-char input.
+	if len(got) > 1100 {
+		t.Errorf("note should trim a very long prior error, got %d chars", len(got))
 	}
 }

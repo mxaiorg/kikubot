@@ -173,6 +173,18 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 	// never told. See internal/services/send_tracker.go.
 	ctx = services.WithSendTracker(ctx)
 
+	// Anti-flail guard. Tracks tool calls that have already failed during this
+	// run, keyed by tool name + canonical input. A model that re-issues an
+	// identical failing call (a bad flag, an inaccessible id) gets the same
+	// error and burns a turn — repeated enough times, the whole turn budget is
+	// spent with nothing delivered (observed: a coordinator looping the same
+	// 404'ing Box lookup). When a known-failed call recurs we skip Execute and
+	// return guidance telling the model to change approach. Scoped to this run
+	// only (not seeded from loaded history) so a transient failure in a prior
+	// run doesn't permanently poison the call; varying any argument changes the
+	// key and re-enables execution, which is the intended escape hatch.
+	failedCalls := map[string]string{}
+
 	for turn := 0; turn < maxTurns; turn++ {
 		// Check context before making the API call so we don't fire a
 		// request we already know will fail.
@@ -246,12 +258,25 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 					continue
 				}
 
+				// Short-circuit a call that already failed this run with the
+				// exact same arguments — re-running it just reproduces the error.
+				callKey := toolCallKey(block.Name, block.Input)
+				if prevErr, seen := failedCalls[callKey]; seen {
+					log.Printf("  🔁 %s: blocking repeat of already-failed %s call (identical args)",
+						a.cfg.ID, block.Name)
+					toolResults = append(toolResults, a.provider.NewToolResult(
+						block.ID, repeatedFailureNote(block.Name, prevErr), true,
+					))
+					continue
+				}
+
 				log.Printf("  🔧 %s calling tool: %s", a.cfg.ID, block.Name)
 
 				result, execErr := td.Execute(ctx, block.Input)
 				isError := execErr != nil
 				if isError {
 					result = execErr.Error()
+					failedCalls[callKey] = result
 				}
 
 				// Spill large successful results to disk so the model can
@@ -754,6 +779,50 @@ func sanitizeForFilename(s string) string {
 		out = "result"
 	}
 	return out
+}
+
+// toolCallKey builds a stable identity for a tool invocation: the tool name
+// plus a canonical (key-sorted, whitespace-normalized) encoding of its JSON
+// input, so two calls that differ only in formatting or key order hash equal.
+func toolCallKey(name string, input json.RawMessage) string {
+	return name + "\x00" + canonicalJSON(input)
+}
+
+// canonicalJSON returns a stable string form of a JSON value: object keys
+// sorted and insignificant whitespace removed (json.Marshal does both for the
+// generic interface{} target). Empty/invalid input is returned trimmed and
+// as-is so it still keys consistently.
+func canonicalJSON(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	var v interface{}
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return string(trimmed)
+	}
+	canon, err := json.Marshal(v)
+	if err != nil {
+		return string(trimmed)
+	}
+	return string(canon)
+}
+
+// repeatedFailureNote is returned in place of re-executing a tool call that
+// already failed this run with identical arguments. It surfaces the prior
+// error (trimmed) and steers the model toward changing approach rather than
+// retrying verbatim.
+func repeatedFailureNote(toolName, prevErr string) string {
+	const maxErr = 600
+	if len(prevErr) > maxErr {
+		prevErr = prevErr[:maxErr] + "…"
+	}
+	return fmt.Sprintf(
+		"Blocked: you already called %s with these exact arguments during this task and it failed:\n\n%s\n\n"+
+			"Retrying the identical call will fail the same way. Change the arguments or the approach — a "+
+			"different tool, a search instead of a direct lookup, or the shared_link/as_user path a tool "+
+			"documents — or proceed without this result.",
+		toolName, prevErr)
 }
 
 // sanitizeTruncatedToolInputs walks resp.Content and replaces any tool_use

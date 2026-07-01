@@ -59,6 +59,14 @@ type ContentBlock struct {
 	Name  string // populated for "tool_use" / "server_tool_use" blocks
 	Input json.RawMessage
 
+	// Thinking/Signature are populated for "thinking" blocks; Data for
+	// "redacted_thinking". These must round-trip back to the API verbatim —
+	// the signature is a cryptographic token and a thinking block with an
+	// empty/invalid signature is rejected on re-submission.
+	Thinking  string
+	Signature string
+	Data      string
+
 	// rawJSON stores the original JSON for blocks that need special
 	// serialization when appended to history (e.g. server-side results).
 	rawJSON string

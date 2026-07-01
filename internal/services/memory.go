@@ -98,7 +98,9 @@ func readMemoryFile(threadRoot string) (*Memory, error) {
 	// Order of operations:
 	//   1. Drop messages with corrupt server-side tool-result blocks (a
 	//      known SDK streaming-accumulator bug) — we can't reconstruct them.
-	//   2. Sanitise citations / server_tool_use that the API would reject.
+	//   2. Sanitise citations / server_tool_use that the API would reject,
+	//      and drop unusable thinking blocks (empty signature or empty body)
+	//      that the API rejects on re-submission.
 	//   3. Trim leading messages that would be invalid after (1) removed
 	//      earlier turns (orphaned tool_results, non-user leads).
 	//   4. Wrap each surviving raw message via param.Override so the SDK
@@ -109,7 +111,9 @@ func readMemoryFile(threadRoot string) (*Memory, error) {
 		if messageHasCorruptServerResult(msgRaw) {
 			continue
 		}
-		sanitized = append(sanitized, stripCitationsFromMessage(msgRaw))
+		clean := stripCitationsFromMessage(msgRaw)
+		clean = stripUnusableThinking(clean)
+		sanitized = append(sanitized, clean)
 	}
 	sanitized = trimOrphanedLeadingMessagesRaw(sanitized)
 	for _, msgRaw := range sanitized {
@@ -280,6 +284,68 @@ func stripCitationsFromMessage(raw json.RawMessage) json.RawMessage {
 	if !changed {
 		return raw
 	}
+	if out, err := json.Marshal(msg); err == nil {
+		return out
+	}
+	return raw
+}
+
+// stripUnusableThinking drops thinking / redacted_thinking blocks that the API
+// will reject when the message is re-submitted:
+//   - thinking blocks with an empty signature (the cryptographic token is
+//     required and is verified) or an empty thinking body (a non-empty
+//     signature cannot validate against empty content);
+//   - redacted_thinking blocks with empty data.
+//
+// These arise from the SDK streaming accumulator splitting a thinking block's
+// signature and body across interleaved deltas (fixed upstream by the
+// index-based accumulator, but already persisted in older memory files). A
+// single bad block wedges the whole thread on every reload, so we drop it.
+//
+// The block is only removed when at least one other content block survives —
+// a message must never be left with empty content. Runs on raw JSON (load
+// path, before param.Override wrapping), mirroring stripCitationsFromMessage.
+func stripUnusableThinking(raw json.RawMessage) json.RawMessage {
+	var msg struct {
+		Role    string            `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return raw // not a message shape — return as-is
+	}
+
+	kept := make([]json.RawMessage, 0, len(msg.Content))
+	dropped := false
+	for _, block := range msg.Content {
+		var peek struct {
+			Type      string `json:"type"`
+			Signature string `json:"signature"`
+			Thinking  string `json:"thinking"`
+			Data      string `json:"data"`
+		}
+		if err := json.Unmarshal(block, &peek); err != nil {
+			kept = append(kept, block)
+			continue
+		}
+		unusable := false
+		switch peek.Type {
+		case "thinking":
+			unusable = strings.TrimSpace(peek.Signature) == "" || strings.TrimSpace(peek.Thinking) == ""
+		case "redacted_thinking":
+			unusable = strings.TrimSpace(peek.Data) == ""
+		}
+		if unusable {
+			dropped = true
+			continue
+		}
+		kept = append(kept, block)
+	}
+
+	// Nothing to drop, or dropping would empty the message — leave it intact.
+	if !dropped || len(kept) == 0 {
+		return raw
+	}
+	msg.Content = kept
 	if out, err := json.Marshal(msg); err == nil {
 		return out
 	}
