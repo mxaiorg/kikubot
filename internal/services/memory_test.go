@@ -24,6 +24,61 @@ func blockTypes(t *testing.T, raw json.RawMessage) []string {
 	return out
 }
 
+func TestStripCorruptServerResults(t *testing.T) {
+	// A corrupt text_editor_code_execution_tool_result (identified by the leaked
+	// "OfWebSearchResultBlockArray" union marker) is what wedged Beta's thread:
+	// on reload the API 400s on it. The block and the server_tool_use that
+	// produced it must be stripped, but the regular message_tool tool_use in the
+	// same assistant turn must survive so its tool_result in the next message
+	// stays paired.
+	corruptResult := `{"type":"text_editor_code_execution_tool_result","tool_use_id":"srv_X","content":{"OfWebSearchResultBlockArray":null,"type":"text_editor_code_execution_create_result"}}`
+
+	t.Run("strips corrupt result + paired call, keeps message_tool tool_use", func(t *testing.T) {
+		msg := json.RawMessage(`{"role":"assistant","content":[` +
+			`{"type":"server_tool_use","id":"srv_X","name":"text_editor_code_execution"},` +
+			corruptResult + `,` +
+			`{"type":"text","text":"sending to Kiku"},` +
+			`{"type":"tool_use","id":"toolu_Y","name":"message_tool","input":{}}` +
+			`]}`)
+		out, keep := stripCorruptServerResults(msg)
+		if !keep {
+			t.Fatal("message should survive — it still has text + tool_use")
+		}
+		got := blockTypes(t, out)
+		want := []string{"text", "tool_use"}
+		if len(got) != len(want) {
+			t.Fatalf("block types = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("block types = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("drops message when only corrupt server blocks remain", func(t *testing.T) {
+		msg := json.RawMessage(`{"role":"assistant","content":[` +
+			`{"type":"server_tool_use","id":"srv_X","name":"text_editor_code_execution"},` +
+			corruptResult + `]}`)
+		if _, keep := stripCorruptServerResults(msg); keep {
+			t.Fatal("message should be dropped — nothing survives the strip")
+		}
+	})
+
+	t.Run("leaves a clean (non-corrupt) server result untouched", func(t *testing.T) {
+		msg := json.RawMessage(`{"role":"assistant","content":[` +
+			`{"type":"web_search_tool_result","tool_use_id":"srv_Z","content":[{"type":"web_search_result","url":"https://x"}]}` +
+			`]}`)
+		out, keep := stripCorruptServerResults(msg)
+		if !keep {
+			t.Fatal("clean message should survive")
+		}
+		if got := blockTypes(t, out); len(got) != 1 || got[0] != "web_search_tool_result" {
+			t.Fatalf("clean server result was altered: %v", got)
+		}
+	})
+}
+
 func TestStripUnusableThinking(t *testing.T) {
 	t.Run("drops empty-body thinking but keeps tool_use", func(t *testing.T) {
 		// The wedge from Kiku's thread: a thinking block with a real signature

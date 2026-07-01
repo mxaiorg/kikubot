@@ -96,8 +96,12 @@ func readMemoryFile(threadRoot string) (*Memory, error) {
 	// dropped the entire history on every load.
 	//
 	// Order of operations:
-	//   1. Drop messages with corrupt server-side tool-result blocks (a
-	//      known SDK streaming-accumulator bug) — we can't reconstruct them.
+	//   1. Strip corrupt server-side tool-result blocks (a known SDK
+	//      streaming-accumulator bug) — we can't reconstruct them — along with
+	//      the server_tool_use calls that produced them. Only when that empties
+	//      a message is the whole message dropped. Regular tool_use blocks in
+	//      the same turn (e.g. a message_tool call whose tool_result lives in
+	//      the next message) are preserved, so we don't orphan their pairing.
 	//   2. Sanitise citations / server_tool_use that the API would reject,
 	//      and drop unusable thinking blocks (empty signature or empty body)
 	//      that the API rejects on re-submission.
@@ -108,10 +112,11 @@ func readMemoryFile(threadRoot string) (*Memory, error) {
 	//      ToParam path.
 	var sanitized []json.RawMessage
 	for _, msgRaw := range raw.History {
-		if messageHasCorruptServerResult(msgRaw) {
+		stripped, keep := stripCorruptServerResults(msgRaw)
+		if !keep {
 			continue
 		}
-		clean := stripCitationsFromMessage(msgRaw)
+		clean := stripCitationsFromMessage(stripped)
 		clean = stripUnusableThinking(clean)
 		sanitized = append(sanitized, clean)
 	}
@@ -122,34 +127,103 @@ func readMemoryFile(threadRoot string) (*Memory, error) {
 	return &m, nil
 }
 
-// messageHasCorruptServerResult reports whether the message contains a
-// server-side tool-result block whose `content` field was serialized by the
-// buggy SDK accumulator (identifiable by the Go-style union field
-// `OfWebSearchResultBlockArray` leaking into the JSON).
-func messageHasCorruptServerResult(raw json.RawMessage) bool {
-	var msg struct {
-		Content []json.RawMessage `json:"content"`
+// isCorruptServerResult reports whether a content block is a server-side
+// tool-result block whose `content` field was serialized by the buggy SDK
+// accumulator (identifiable by the Go-style union field
+// `OfWebSearchResultBlockArray` leaking into the JSON). The type set must stay
+// in sync with ToHistoryParam/needsOriginalRaw in provider/anthropic.go —
+// text_editor_/bash_code_execution results arrive via the code execution that
+// backs web_search_20260209's dynamic filtering.
+func isCorruptServerResult(blockType string, content json.RawMessage) bool {
+	switch blockType {
+	case "code_execution_tool_result", "bash_code_execution_tool_result",
+		"text_editor_code_execution_tool_result",
+		"web_search_tool_result", "web_fetch_tool_result":
+		return bytes.Contains(content, []byte(`"OfWebSearchResultBlockArray"`))
 	}
+	return false
+}
+
+// stripCorruptServerResults removes corrupt server-side tool-result blocks and
+// the server_tool_use blocks that produced them from a single serialized
+// message. These blocks persist without the pre-accumulate rawJSON, so on
+// reload they carry the SDK's re-marshalled union fields and the API rejects
+// them. Regular tool_use/tool_result blocks (e.g. a message_tool call whose
+// result lives in the next message) are left untouched so their cross-message
+// pairing survives. Returns the rewritten message and whether any content
+// remains — keep is false when stripping empties the message, so the caller
+// drops it entirely.
+func stripCorruptServerResults(raw json.RawMessage) (json.RawMessage, bool) {
+	var msg map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
-		return false
+		return raw, true // unparseable — leave for downstream handling
 	}
-	for _, block := range msg.Content {
+	contentRaw, ok := msg["content"]
+	if !ok {
+		return raw, true
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(contentRaw, &blocks); err != nil {
+		return raw, true
+	}
+
+	// First pass: flag corrupt result blocks and record the tool_use_ids they
+	// reference, so the paired server_tool_use calls can be dropped too (a
+	// server_tool_use with no result is itself rejected by the API).
+	corrupt := make([]bool, len(blocks))
+	orphanedCallIDs := map[string]bool{}
+	var anyCorrupt bool
+	for i, b := range blocks {
 		var peek struct {
-			Type    string          `json:"type"`
-			Content json.RawMessage `json:"content"`
+			Type      string          `json:"type"`
+			Content   json.RawMessage `json:"content"`
+			ToolUseID string          `json:"tool_use_id"`
 		}
-		if err := json.Unmarshal(block, &peek); err != nil {
+		if err := json.Unmarshal(b, &peek); err != nil {
 			continue
 		}
-		switch peek.Type {
-		case "code_execution_tool_result", "bash_code_execution_tool_result",
-			"web_search_tool_result":
-			if bytes.Contains(peek.Content, []byte(`"OfWebSearchResultBlockArray"`)) {
-				return true
+		if isCorruptServerResult(peek.Type, peek.Content) {
+			corrupt[i] = true
+			anyCorrupt = true
+			if peek.ToolUseID != "" {
+				orphanedCallIDs[peek.ToolUseID] = true
 			}
 		}
 	}
-	return false
+	if !anyCorrupt {
+		return raw, len(blocks) > 0
+	}
+
+	// Second pass: keep everything except the corrupt results and their
+	// producing server_tool_use calls.
+	kept := make([]json.RawMessage, 0, len(blocks))
+	for i, b := range blocks {
+		if corrupt[i] {
+			continue
+		}
+		var peek struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(b, &peek); err == nil &&
+			peek.Type == "server_tool_use" && orphanedCallIDs[peek.ID] {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	if len(kept) == 0 {
+		return nil, false
+	}
+	newContent, err := json.Marshal(kept)
+	if err != nil {
+		return raw, true
+	}
+	msg["content"] = newContent
+	out, err := json.Marshal(msg)
+	if err != nil {
+		return raw, true
+	}
+	return out, true
 }
 
 // trimOrphanedLeadingMessagesRaw drops leading messages that would be
