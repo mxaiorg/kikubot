@@ -314,8 +314,12 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 			case "server_tool_use":
 				log.Printf("  🌐 %s: server tool: %s", a.cfg.ID, block.Name)
 
-			case "web_search_tool_result", "code_execution_tool_result", "bash_code_execution_tool_result":
+			case "web_search_tool_result", "web_fetch_tool_result",
+				"code_execution_tool_result", "bash_code_execution_tool_result",
+				"text_editor_code_execution_tool_result":
 				// Server-side result — already processed by the API, nothing to feed back.
+				// text_editor_/bash_code_execution results arrive via the code
+				// execution that backs web_search_20260209's dynamic filtering.
 
 			default:
 				log.Printf("  ℹ️ %s: unhandled block type: %s", a.cfg.ID, block.Type)

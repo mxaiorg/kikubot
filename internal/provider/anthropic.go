@@ -224,7 +224,8 @@ func (p *AnthropicProvider) ToHistoryParam(resp *MessageResponse) anthropic.Mess
 	for i, c := range resp.Content {
 		switch c.Type {
 		case "code_execution_tool_result", "bash_code_execution_tool_result",
-			"web_search_tool_result":
+			"text_editor_code_execution_tool_result",
+			"web_search_tool_result", "web_fetch_tool_result":
 			// Raw JSON here is the original pre-accumulate block JSON
 			// (see CreateMessage); pass it through unchanged.
 			mp.Content[i] = param.Override[anthropic.ContentBlockParamUnion](json.RawMessage(c.rawJSON))
@@ -323,7 +324,8 @@ func isAccumulateMarshalError(err error) bool {
 func needsOriginalRaw(blockType string) bool {
 	switch blockType {
 	case "code_execution_tool_result", "bash_code_execution_tool_result",
-		"web_search_tool_result":
+		"text_editor_code_execution_tool_result",
+		"web_search_tool_result", "web_fetch_tool_result":
 		return true
 	default:
 		return false
