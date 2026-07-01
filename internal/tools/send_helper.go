@@ -277,6 +277,23 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 		content = params.Message
 	}
 
+	// A single call can be both a reply and a forward: the coordinator wants
+	// to stay in-thread (In-Reply-To, handled above) AND deliver a file
+	// (X-Forwarded). The if/else chain above only honors the forward when
+	// it's the sole directive, so when we're also replying it would silently
+	// drop the attachment. Re-fetch the forwarded email here and append just
+	// its attachments — leaving the reply's subject/body/threading intact.
+	if inReplyTo != "" && forward != "" {
+		fwdEmails, fwdErr := services.GetEmails(ctx, []string{forward})
+		if fwdErr != nil {
+			return "", fmt.Errorf("error getting forward email: %w", fwdErr)
+		}
+		if len(fwdEmails) == 0 {
+			return "", fmt.Errorf("no forward email found")
+		}
+		attachments = append(attachments, fwdEmails[0].Attachments...)
+	}
+
 	// Fall back to the subject provided by the caller (e.g., new emails)
 	if subject == "" {
 		subject = params.Subject

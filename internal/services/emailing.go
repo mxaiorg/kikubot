@@ -819,7 +819,9 @@ func EnsureAngleBrackets(id string) string {
 	return id
 }
 
-func SendEmail(ctx context.Context, msg Email) error {
+// SendEmail is a package-level var (not a plain func) so tests can stub the
+// SMTP send. Production behaviour is unchanged — call sites use it identically.
+var SendEmail = func(ctx context.Context, msg Email) error {
 	m := gomail.NewMessage()
 
 	from := msg.From
@@ -966,7 +968,9 @@ func appendToSent(m *gomail.Message) error {
 	return c.Append(config.SentFolder, []string{imap.SeenFlag}, time.Now(), &buf)
 }
 
-func GetEmails(ctx context.Context, messageIds []string) ([]Email, error) {
+// GetEmails is a package-level var (not a plain func) so tests can stub the
+// IMAP fetch. Production behaviour is unchanged — call sites use it identically.
+var GetEmails = func(ctx context.Context, messageIds []string) ([]Email, error) {
 	var emails []Email
 	var uncached []string
 	//log.Println("GetEmails:", messageIds)
