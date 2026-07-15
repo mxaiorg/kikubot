@@ -1,5 +1,5 @@
 // Configurator is an HTMX-based dashboard for editing kikubot's configuration
-// files (configs/env/common.env, configs/env/<agent>.env, and the bundled
+// files (configs/agents.yaml, configs/secrets.env, and the bundled
 // docker-mailserver postfix maps under services/dms/config/).
 //
 // Run from the kikubot project root:

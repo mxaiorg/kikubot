@@ -321,6 +321,11 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 				// text_editor_/bash_code_execution results arrive via the code
 				// execution that backs web_search_20260209's dynamic filtering.
 
+			case "thinking", "redacted_thinking":
+				// Reasoning blocks — expected on every adaptive-thinking turn.
+				// ToHistoryParam round-trips them verbatim for the next request;
+				// there is nothing to execute or feed back here.
+
 			default:
 				log.Printf("  ℹ️ %s: unhandled block type: %s", a.cfg.ID, block.Type)
 			}

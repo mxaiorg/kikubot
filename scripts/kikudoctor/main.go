@@ -1,5 +1,5 @@
 // kikudoctor validates a Kikubot deployment by checking agents.yaml,
-// configs/env/, the tools registry, and docker-compose.yml.
+// configs/secrets.env, the tools registry, and docker-compose.yml.
 //
 // Run from the kikubot project root:
 //
