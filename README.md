@@ -44,7 +44,7 @@ You can spawn one or more agent containers with this repository on the same mach
 
 Coordinator agents can be organized into teams, and each team can have multiple agents. Coordinator agents team members can in themselves be coordinators. Much like how organizations are structured into divisions, with each division representing multiple departments which in turn represent multiple teams – so can you structure your network of agents. Each coordinator only needs to know the subset of agents it works with directly. Theoretically, a Kikubot deployment can scale to hundreds of thousands of agents.
 
-## Live Demo
+## Live Demo (temporarily disabled)
 
 _Ask Alpha about the weather in your town. Email your query to `alpha@labtest.mxhero.com`_.
 
@@ -127,8 +127,13 @@ A dashboard configuration tool can be found in the scripts directory. It's a web
 ```bash
 go run ./scripts/configurator  # serves on 127.0.0.1:50042
 ```
-
 <img src="assets/Configurator.png" alt="kikubot" width="800">
+
+### Run your bots
+Once configured:
+```bash
+docker compose up --build
+```
 
 See [scripts/configurator/README.md](scripts/configurator/README.md) for more details. There is also a, slightly outdated, [Configurator Video Tutorial](https://vimeo.com/1193264234?share=copy&fl=sv&fe=ci)
 
