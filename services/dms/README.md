@@ -6,6 +6,8 @@ As an extra security precaution, it is recommended to use a dedicated email doma
 
 If you do use this server, be sure to properly configure the email domain for delivery (SPF, DKIM, DMARC suggested). See [README-SPF_DKIM_etc.md](README-SPF_DKIM_etc.md)
 
+`dkim-txt.sh` in this directory folds a generated DKIM key into the multiple quoted 255-byte strings that DNS requires (Route 53 rejects the value otherwise): `./dkim-txt.sh <domain>`.
+
 See the config directory for additional domain configuration.
 
 ## Why create a separate agent domain?

@@ -95,6 +95,8 @@ Publish its contents as a TXT record — everything after `p=` is one long blob:
 mail._domainkey.agents.acme.com.   IN  TXT  "v=DKIM1; k=rsa; p=MIIBIjANBgkqhki…AB"
 ```
 
+If your DNS provider rejects that as too long — Route 53 will — jump to [The 255-character problem](#the-255-character-problem-route-53-and-friends) below and run `./dkim-txt.sh`.
+
 Note rspamd emits `v=DKIM1; k=rsa; p=…` without the `h=sha256` tag that OpenDKIM includes. That's fine — `h=` is an optional hash restriction, not a requirement.
 
 Confirm rspamd actually picked up the domain:
@@ -117,14 +119,53 @@ Take everything inside the quotes (concatenated, no quotes, no parentheses) and 
 docker compose restart dms
 ```
 
-### Verify (either signer)
+### The 255-character problem (Route 53 and friends)
 
-If your DNS provider has a character limit on TXT values (255 is the per-string limit, but most UIs accept the whole thing and split for you), paste the whole string. If they reject it as too long, split into multiple quoted segments — DNS concatenates them.
+A DNS TXT record is not one long string — it's a *sequence* of character-strings, each capped at **255 bytes**. A 2048-bit RSA public key is ~392 base64 characters, so the DKIM value always exceeds one string. Some providers split it for you silently; **Route 53 does not**, and rejects the value outright. This is a hard DNS limit, not a mistake on your part.
+
+The fix is to publish **one record** whose value is several quoted strings separated by single spaces. Resolvers concatenate them back into one value at lookup time, which is exactly what DKIM verification expects — this is the standard way to publish long TXT values, with no side effects on DKIM.
+
+`dkim-txt.sh` in this directory does the folding:
+
+```
+./dkim-txt.sh agents.acme.com
+```
+
+It finds the key under `config/rspamd/dkim/`, normalises it to a single value, and prints the paste-ready record:
+
+```
+"v=DKIM1; k=rsa; p=MIIBIjANBgkqhki…(255 chars)" "…(remainder)wIDAQAB"
+```
+
+The value goes to **stdout** and the record name / verify hint to **stderr**, so `./dkim-txt.sh agents.acme.com | pbcopy` copies exactly the value and nothing else. Other forms:
+
+```
+./dkim-txt.sh                                  # auto-discover, if only one domain has a key
+./dkim-txt.sh -f config/opendkim/keys/agents.acme.com/mail.txt   # OpenDKIM layout
+docker exec dms setup config dkim domain agents.acme.com | ./dkim-txt.sh -   # straight from the generator
+./dkim-txt.sh --raw agents.acme.com            # single unsplit string, for providers that chunk it themselves
+./dkim-txt.sh -c 200 agents.acme.com           # smaller chunks, if your provider is fussier than the RFC
+```
+
+It accepts rspamd's multi-line `( "…" "…" )` file, the single-line blob the setup command prints, and OpenDKIM's `mail.txt` — in each case reassembling the value the way a resolver would (concatenating quoted-string contents, discarding what's between them) rather than naively stripping quotes, which corrupts keys split mid-base64.
+
+Two things that are easy to get subtly wrong:
+
+* **It's one record, not two.** Creating two separate TXT record sets for the two halves breaks DKIM. One record, whose value field contains both quoted strings.
+* **A single space between the quoted parts, no line break.**
+
+If you'd rather not use the script and already have the value as one clean line, the equivalent one-liner is:
+
+```bash
+echo -n "v=DKIM1; k=rsa; p=YOUR_FULL_BASE64_KEY_HERE" | fold -w255 | sed 's/.*/"&"/' | tr '\n' ' '
+```
+
+### Verify (either signer)
 
 ```
 dig +short TXT mail._domainkey.agents.acme.com
 ```
-should return your p=… blob.
+should return your p=… blob. `dig` will show it as multiple quoted strings — that's correct and expected, not a sign it's still broken.
 
 ## 4\. DMARC — TXT record at_dmarc
 This is the policy that ties SPF and DKIM together and tells receivers what to do on failure. Start in **monitoring mode** so you can see what's actually happening before you tighten:
@@ -150,6 +191,7 @@ All three pass. If any are neutral, softfail, or fail, that's your next thing to
 * **HELO name mismatch.** Postfix's HELO must match the PTR. In DMS, set OVERRIDE_HOSTNAME if your container hostname differs from your public FQDN, or just make sure the compose hostname: matches the FQDN with the PTR.
 * **DKIM signing the wrong domain.** Run `docker exec dms setup config dkim help` to see the flags — they are keyword-style, not `--`-prefixed: `[keytype rsa|ed25519] [keysize <bits>] [selector <selector>] [domain <domain>]`. If you send From: @agents.agents.acme.com, you need a DKIM key for *that* domain too — the From-domain has to be signed for alignment.
 * **TLS cert.** Self-signed is fine for opportunistic TLS (Gmail accepts it for outbound delivery in your direction, as your earlier log showed). It is **not** fine for MTA-STS. You don't need MTA-STS for Gmail to accept you, but if you eventually want it, you'll need a Let's Encrypt cert covering mail.agents.acme.com.
+* **TXT value rejected as too long.** A 2048-bit key can't fit in one 255-byte DNS string. It has to be published as one record containing multiple quoted strings — `./dkim-txt.sh <domain>` emits it in that form. See [The 255-character problem](#the-255-character-problem-route-53-and-friends).
 * **Reputation warmup.** Even with all four records green, a brand-new IP sending its first message to Gmail can land in spam. Send slowly for the first week or two; don't blast.
 * **Port 25 blocked outbound.** Many cloud providers (AWS, GCP, Azure, OVH on default plans, most home ISPs) block outbound 25 by default. Test: nc -vz gmail-smtp-in.l.google.com 25 from the DMS host. If it hangs, file a request with your provider to unblock — or, again, use a relay.
 
