@@ -131,13 +131,21 @@ The fix is to publish **one record** whose value is several quoted strings separ
 ./dkim-txt.sh agents.acme.com
 ```
 
-It finds the key under `config/rspamd/dkim/`, normalises it to a single value, and prints the paste-ready record:
+It finds the key under `config/rspamd/dkim/`, normalises it to a single value, and prints the paste-ready record followed by a blank line and a note:
 
 ```
 "v=DKIM1; k=rsa; p=MIIBIjANBgkqhki…(255 chars)" "…(remainder)wIDAQAB"
+
+# record name:  mail._domainkey.agents.acme.com
+# record type:  TXT
+# value:        2 quoted string(s), 410 bytes total, chunked at 255
+#
+# This is ONE record whose value is several quoted strings separated by
+# single spaces — not several records. Paste the whole line, quotes included.
+# verify:       dig +short TXT mail._domainkey.agents.acme.com
 ```
 
-The value goes to **stdout** and the record name / verify hint to **stderr**, so `./dkim-txt.sh agents.acme.com | pbcopy` copies exactly the value and nothing else. Other forms:
+Only the first line is the record. It goes to **stdout**; everything from the blank line down is the note, on **stderr** — so `./dkim-txt.sh agents.acme.com | pbcopy` copies exactly the value and nothing else, and the blank line keeps a terminal drag-select clean too. Other forms:
 
 ```
 ./dkim-txt.sh                                  # auto-discover, if only one domain has a key

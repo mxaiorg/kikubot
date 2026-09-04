@@ -178,7 +178,15 @@ printf '%s\n' "$input" | awk -v chunk="$chunk" -v raw="$raw" -v recname="$recnam
       print o
     }
 
+    # Flush the value before writing the note. stdout is block-buffered when it
+    # is not a terminal, so without this the note can overtake the record it
+    # describes whenever both are redirected to the same place.
+    fflush()
+
     parts = int((L + chunk - 1) / chunk)
+    # Blank line so the value above is visually separate from this note, and a
+    # terminal drag-select of the record picks up only the record.
+    print "" > "/dev/stderr"
     if (recname != "") print "# record name:  " recname > "/dev/stderr"
     print "# record type:  TXT" > "/dev/stderr"
     if (raw == 1)
