@@ -10,6 +10,25 @@ The below explains how to set up your domain with SPF, DKIM, and DMARC records. 
 
 > NOTE: replace all instances of `$agents.acme.com` with your OWN domain.
 
+> **Service name vs container name.** In `docker-compose.yml` the compose *service* is `mailserver` and the *container* is named `dms`. Use `docker compose restart mailserver` / `docker compose logs mailserver` (compose commands take the service), but `docker exec dms …` / `docker restart dms` (plain docker commands take the container). `docker compose restart dms` fails with "no such service".
+
+## DKIM quick path (do these in this order)
+
+Most DKIM time is lost verifying DNS while the signer never ran. Confirm signing happens *before* you chase DNS.
+
+1. Generate the key **and** fix the subdomain setting in one go — from `services/dms/` with the container running:
+   ```bash
+   ./dkim-setup.sh agents.acme.com
+   ```
+   It runs DMS's generator, sets `use_esld = false` (see [why](#dkim-on-a-subdomain-use_esld) — the default silently skips signing for a subdomain), restarts the container, confirms the live config, checks key permissions, and prints the TXT record folded for DNS.
+2. Publish the printed TXT record at `mail._domainkey.agents.acme.com` (one record, several quoted strings). Verify: `dig +short TXT mail._domainkey.agents.acme.com`.
+3. Send a test from an agent account to `check-auth@verifier.port25.com`.
+4. Confirm rspamd actually signed it: see [Prove that rspamd is signing](#prove-that-rspamd-is-signing). You want `DKIM_SIGNED` next to `LOCAL_OUTBOUND` in `rspamd.log`.
+5. Read the Port25 reply: `DKIM check: pass`.
+6. Publish DMARC at `p=none` ([section 4](#4-dmarc--txt-record-at_dmarc)), watch the reports for a week, then tighten.
+
+The rest of this document explains each piece and what to do when a step fails.
+
 Here's the playbook, using your actual domain (e.g., agents.acme.com, mail host mail.agents.acme.com → replace with your own) so you can copy/paste. The order matters — Gmail's bar in 2026 is essentially "all four of PTR, SPF, DKIM, DMARC pass and align," so skipping any one of them will still get you 5.7.26 (failed delivery).
 
 ## 0\. Prerequisites you have to have
@@ -59,11 +78,20 @@ dig +short TXT agents.acme.com
 ```
 
 ## 3\. DKIM — generate key in DMS, publish TXT
-DMS has a built-in helper. From the host running the DMS container:
+
+> ‼️ **If your agents live on a subdomain (which this repo recommends), signing will not work until `use_esld = false` is set in `dkim_signing.conf`.** DMS's generator writes `use_esld = true`, and with that rspamd looks `alpha@agents.acme.com` up as `acme.com`, finds nothing, and skips signing without logging an error. Details and fix in [DKIM on a subdomain](#dkim-on-a-subdomain-use_esld). The `./dkim-setup.sh` wrapper below applies the fix for you.
+
+**Recommended:** from `services/dms/` with the container running:
+```bash
+./dkim-setup.sh agents.acme.com          # generate + patch use_esld + restart + verify + print TXT
+./dkim-setup.sh --fix-only agents.acme.com   # key already generated: just patch + verify + print TXT
+```
+
+**Manual equivalent.** DMS has a built-in helper. From the host running the DMS container:
 ```
 docker exec -ti dms setup config dkim domain agents.acme.com
 ```
-The selector defaults to `mail` and the key to RSA 2048.
+The selector defaults to `mail` and the key to RSA 2048. Afterwards you must still set `use_esld = false` and restart — see [DKIM on a subdomain](#dkim-on-a-subdomain-use_esld).
 
 > ‼️ **Where the key lands depends on which signer is enabled.** DMS routes this command to whichever DKIM implementation is turned on in your compose env, and the two write to completely different paths:  
 > ⚠️ **Change:** 'agents.acme.com.' to your domain.
@@ -103,9 +131,72 @@ Confirm rspamd actually picked up the domain:
 ```
 docker exec dms rspamadm configdump dkim_signing
 ```
-You should see your domain with its selector and the path to the private key.
+You should see your domain with its selector and the path to the private key, **and** `use_esld = false` (see next section). This dump reflects the *running* config, so if you just edited `override.d/dkim_signing.conf` and haven't restarted, it will still show the old values.
 
 To sign a **second** domain, re-run the same command with the other domain; rspamd appends another entry to `dkim_signing.conf`.
+
+### DKIM on a subdomain (`use_esld`)
+
+`setup config dkim` writes `services/dms/config/rspamd/override.d/dkim_signing.conf` with:
+```
+use_domain = "header";
+use_esld = true;
+try_fallback = false;
+domain { agents.acme.com { … } }
+```
+`use_esld = true` tells rspamd to reduce the From: domain to its **effective second-level domain** before looking it up in the `domain {}` map. Mail from `alpha@agents.acme.com` is therefore looked up as `acme.com`. There is no `acme.com` entry, `try_fallback = false` forbids guessing, so rspamd skips signing. The skip is logged only at debug level, so with default logging you see nothing at all: no error, no DNS lookup, just `LOCAL_OUTBOUND` without `DKIM_SIGNED`.
+
+Fix (`dkim-setup.sh` does exactly this):
+```bash
+cd services/dms
+sed -i.bak 's/^use_esld = true;/use_esld = false;/' config/rspamd/override.d/dkim_signing.conf && rm config/rspamd/override.d/dkim_signing.conf.bak
+grep use_esld config/rspamd/override.d/dkim_signing.conf          # must show false
+docker restart dms && sleep 15
+docker exec dms rspamadm configdump dkim_signing | grep use_esld   # must show false in the RUNNING config
+```
+Unlike a new key (which DMS hot-reloads), a change under `override.d/` needs a container restart.
+
+Two ways to avoid the manual step: run `./dkim-setup.sh` instead of the raw generator, or copy the committed template `config/rspamd/override.d/dkim_signing-example.conf` to `dkim_signing.conf` and replace `agents.example.com` **before** generating the key — DMS sees the existing file and only adds the key. The Configurator's Email Service page also rewrites `use_esld` to `false` every time it is saved, and shows a DKIM checklist under *Access Security*.
+
+If you send From: the apex domain (`alpha@acme.com`) rather than a subdomain, `use_esld = true` is harmless; `false` is still correct and is what the template ships.
+
+### Prove that rspamd is signing
+
+The DNS checks above prove the *record* is right. They say nothing about whether a signature is being *applied*. Send a message from an agent account, then:
+```bash
+docker exec dms sh -c 'grep -E "DKIM_SIGNED|LOCAL_OUTBOUND" /var/log/mail/rspamd.log | tail -5'
+```
+Read the symbol list on the line for your message:
+
+| You see | Meaning | Next |
+|---|---|---|
+| `DKIM_SIGNED(0.00){agents.acme.com:s=mail;}` next to `LOCAL_OUTBOUND` | Signed. | Publish DNS / read the Port25 reply. |
+| `LOCAL_OUTBOUND` only, **no** `DKIM_SIGNED`, no error | dkim_signing ran and *declined*. Config problem, not DNS. | Work the list below, top to bottom. |
+| An error mentioning the key or `check_pubkey` | Key/DNS mismatch. | Compare `.public.dns.txt` with `dig`; regenerate if they differ. |
+| No `LOCAL_OUTBOUND` at all | The message didn't pass through rspamd as authenticated outbound (`settings_id` should be `authenticated`). | Check the agent is submitting on 587 with auth, and `ENABLE_RSPAMD=1`. |
+
+Causes of a silent decline, in order of likelihood:
+
+1. **`use_esld = true` with a subdomain sender** — [above](#dkim-on-a-subdomain-use_esld). Check `docker exec dms rspamadm configdump dkim_signing | grep use_esld`.
+2. **Domain not in the map** — the From: domain has no `domain { … }` entry. Same configdump; re-run the generator for that exact domain.
+3. **Private key not readable by rspamd's user.** Signing silently skips if `_rspamd` can't open the key:
+   ```bash
+   docker exec dms ls -ln /tmp/docker-mailserver/rspamd/dkim/
+   docker exec dms id _rspamd
+   ```
+   Owner UID must match `_rspamd`'s. If not: `docker exec dms chown _rspamd:_rspamd /tmp/docker-mailserver/rspamd/dkim/*`.
+4. **Module disabled** — `enabled = false` in the configdump.
+
+#### Seeing *why* rspamd skipped
+
+rspamd's default log level hides the skip reason. Temporarily raise it. Put the file in `override.d/` (highest priority) rather than `local.d/` — a `local.d/logging.inc` has been seen to have no effect in a DMS container — and always confirm with `configdump` that the running config picked it up:
+```bash
+mkdir -p config/rspamd/override.d
+printf 'level = "debug";\ndebug_modules = ["dkim_signing"];\n' > config/rspamd/override.d/logging.inc
+docker restart dms && sleep 15
+docker exec dms rspamadm configdump logging | grep -E 'level|debug_modules'   # confirm it loaded
+```
+Send a test message, then `grep -i dkim /var/log/mail/rspamd.log` inside the container; the skip reason (e.g. "no domain for agents.acme.com", "cannot load private key") is spelled out. **Remove the file and restart once you're done** — debug logging is noisy.
 
 ### OpenDKIM layout (only if you set `ENABLE_OPENDKIM=1`)
 
@@ -114,9 +205,9 @@ The key is written to `services/dms/config/opendkim/keys/agents.acme.com/mail.tx
 mail._domainkey   IN   TXT   ( "v=DKIM1; h=sha256; k=rsa; "
     "p=MIIBIjANBgkqhki…long…AB" )
 ```
-Take everything inside the quotes (concatenated, no quotes, no parentheses) and publish it as the TXT record above. Unlike rspamd, OpenDKIM needs a restart to load the key:
+Take everything inside the quotes (concatenated, no quotes, no parentheses) and publish it as the TXT record above. Unlike rspamd, OpenDKIM needs a restart to load the key (compose commands take the *service* name; plain docker takes the *container* name):
 ```
-docker compose restart dms
+docker compose restart mailserver    # or: docker restart dms
 ```
 
 ### The 255-character problem (Route 53 and friends)
@@ -197,6 +288,9 @@ All three pass. If any are neutral, softfail, or fail, that's your next thing to
 
 ## 6\. Things that quietly bite you
 * **HELO name mismatch.** Postfix's HELO must match the PTR. In DMS, set OVERRIDE_HOSTNAME if your container hostname differs from your public FQDN, or just make sure the compose hostname: matches the FQDN with the PTR.
+* **DKIM never signs, no error (subdomain).** `use_esld = true` in `dkim_signing.conf` collapses `agents.acme.com` to `acme.com`, which isn't in the domain map, so rspamd silently skips. Set `use_esld = false` and restart — [details](#dkim-on-a-subdomain-use_esld). `./dkim-setup.sh` does it for you.
+* **Don't chase red herrings when nothing is signed.** `check_pubkey` only decides whether the published TXT record is compared against the key before signing; it never decides *whether* a domain is looked up, so disabling it cannot make signing start. Likewise a custom `rspamd/settings.conf` is not needed — DMS's stock `authenticated` settings profile is what makes agent mail eligible for signing. If you changed either while debugging, put them back (`check_pubkey = true`, delete the custom `settings.conf`) once you see `DKIM_SIGNED`.
+* **`docker compose restart dms` says "no such service".** The compose service is `mailserver`; `dms` is the container name. Use `docker compose restart mailserver` or `docker restart dms`.
 * **DKIM signing the wrong domain.** Run `docker exec dms setup config dkim help` to see the flags — they are keyword-style, not `--`-prefixed: `[keytype rsa|ed25519] [keysize <bits>] [selector <selector>] [domain <domain>]`. If you send From: @agents.agents.acme.com, you need a DKIM key for *that* domain too — the From-domain has to be signed for alignment.
 * **TLS cert.** Self-signed is fine for opportunistic TLS (Gmail accepts it for outbound delivery in your direction, as your earlier log showed). It is **not** fine for MTA-STS. You don't need MTA-STS for Gmail to accept you, but if you eventually want it, you'll need a Let's Encrypt cert covering mail.agents.acme.com.
 * **TXT value rejected as too long.** A 2048-bit key can't fit in one 255-byte DNS string. It has to be published as one record containing multiple quoted strings — `./dkim-txt.sh <domain>` emits it in that form. See [The 255-character problem](#the-255-character-problem-route-53-and-friends).

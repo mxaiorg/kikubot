@@ -321,6 +321,7 @@ func resolveExternalEmail(root, email string) string {
 type emailServiceView struct {
 	*emailServiceConfig
 	SSL   sslCertStatus
+	DKIM  dkimStatus
 	Dirty bool
 }
 
@@ -360,7 +361,18 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
 				return
 			}
-			setFlash(w, "success", "Saved postfix-transport.cf, postfix-sender-access.cf, postfix-main.cf, docker-compose.yml, and postfix-accounts.cf")
+			msg := "Saved postfix-transport.cf, postfix-sender-access.cf, postfix-main.cf, docker-compose.yml, and postfix-accounts.cf"
+			// A DKIM key generated with `setup config dkim` leaves rspamd unable
+			// to sign for a subdomain (use_esld = true). Fix it whenever the
+			// page is saved so the operator doesn't have to know about it.
+			if patched, err := fixDKIMUseESLD(s.root); err != nil {
+				setFlash(w, "error", msg+"\nBut fixing use_esld in rspamd/override.d/dkim_signing.conf failed: "+err.Error())
+				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
+				return
+			} else if patched {
+				msg += "\nAlso set use_esld = false in services/dms/config/rspamd/override.d/dkim_signing.conf so rspamd signs mail from " + c.AgentDomain + ". Restart the mail container (docker restart dms) for it to take effect."
+			}
+			setFlash(w, "success", msg)
 		} else {
 			setFlash(w, "success", "Email service disabled (no files were modified)")
 		}
@@ -374,6 +386,7 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 	view := emailServiceView{
 		emailServiceConfig: c,
 		SSL:                loadSSLCertStatus(s.root),
+		DKIM:               loadDKIMStatus(s.root, c.AgentDomain),
 	}
 	s.render(w, r, "email_service", pageData{Active: "email", Data: view})
 }
@@ -419,6 +432,7 @@ func (s *server) handleEmailServiceCert(w http.ResponseWriter, r *http.Request) 
 	view := emailServiceView{
 		emailServiceConfig: c,
 		SSL:                loadSSLCertStatus(s.root),
+		DKIM:               loadDKIMStatus(s.root, domain),
 		Dirty:              !emailServiceConfigEqual(c, loadEmailServiceConfig(s.root)),
 	}
 	s.render(w, r, "email_service", pageData{Active: "email", Data: view, Flash: flashMsg, FlashKind: flashKind})

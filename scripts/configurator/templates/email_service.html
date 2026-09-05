@@ -24,7 +24,22 @@
 
     <fieldset class="subcard">
       <legend>Access Security</legend>
-      <p class="hint">Strong spoofing protection is required to ensure accurate access controls. Configure SPF, DKIM, and DMARC for this domain at your DNS provider.</p>
+      <p class="hint">Strong spoofing protection is required to ensure accurate access controls. Configure SPF, DKIM, and DMARC for this domain at your DNS provider. Step-by-step: <code>services/dms/README-SPF_DKIM_etc.md</code>.</p>
+      {{with .DKIM}}
+      {{if .Started}}
+        {{if .KeyExists}}<p class="status-ok">✅ DKIM key for <code>{{.Domain}}</code> found ({{range $i, $f := .KeyFiles}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}})</p>
+        {{else}}<p class="status-bad">❌ No DKIM private key for <code>{{.Domain}}</code> in <code>services/dms/config/rspamd/dkim/</code></p>{{end}}
+        {{if .ConfExists}}
+          {{if .DomainInConf}}<p class="status-ok">✅ <code>{{.Domain}}</code> is in <code>rspamd/override.d/dkim_signing.conf</code></p>
+          {{else}}<p class="status-bad">❌ <code>{{.Domain}}</code> has no entry in <code>rspamd/override.d/dkim_signing.conf</code> — re-run key generation for this domain</p>{{end}}
+          {{if .UseESLDFalse}}<p class="status-ok">✅ <code>use_esld = false</code> (rspamd will sign for a subdomain)</p>
+          {{else}}<p class="status-bad">❌ <code>use_esld</code> is not <code>false</code> — rspamd will silently skip signing mail from <code>{{.Domain}}</code>. Saving this page fixes it; then restart the mail container.</p>{{end}}
+        {{else}}<p class="status-bad">❌ <code>rspamd/override.d/dkim_signing.conf</code> not found</p>{{end}}
+        {{if .Ready}}<p class="hint">Config looks right. Publish the TXT record (<code>./dkim-txt.sh {{.Domain}}</code> in <code>services/dms/</code>) and confirm signing with a test message to <code>check-auth@verifier.port25.com</code>.</p>{{end}}
+      {{else}}
+        <p class="hint">No DKIM key yet. With the mail container running, from <code>services/dms/</code> run <code>./dkim-setup.sh {{if .Domain}}{{.Domain}}{{else}}&lt;agent-domain&gt;{{end}}</code>. It generates the key, sets <code>use_esld = false</code> (required for a subdomain — DMS's default silently skips signing otherwise), restarts the container, verifies, and prints the DNS record to publish.</p>
+      {{end}}
+      {{end}}
     </fieldset>
 
     <fieldset class="subcard">

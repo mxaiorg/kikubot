@@ -6,7 +6,12 @@ As an extra security precaution, it is recommended to use a dedicated email doma
 
 If you do use this server, be sure to properly configure the email domain for delivery (SPF, DKIM, DMARC suggested). See [README-SPF_DKIM_etc.md](README-SPF_DKIM_etc.md)
 
-`dkim-txt.sh` in this directory folds a generated DKIM key into the multiple quoted 255-byte strings that DNS requires (Route 53 rejects the value otherwise): `./dkim-txt.sh <domain>`.
+Two helper scripts in this directory:
+
+- `./dkim-setup.sh <domain>` — the one command for DKIM: generates the key in the container, sets `use_esld = false` (without it rspamd **silently never signs** mail from a subdomain such as `agents.example.com`, which is the layout this repo recommends), restarts, verifies the running config, and prints the DNS record.
+- `./dkim-txt.sh <domain>` — folds a generated DKIM key into the multiple quoted 255-byte strings that DNS requires (Route 53 rejects the value otherwise). `dkim-setup.sh` calls it for you.
+
+Note the compose *service* is `mailserver` while the *container* is `dms`: `docker compose restart mailserver`, but `docker exec dms …`.
 
 See the config directory for additional domain configuration.
 
