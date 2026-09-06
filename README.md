@@ -65,6 +65,7 @@ agent — all in Docker, all on your machine, nothing exposed to the internet.
 
 ```bash
 git clone https://github.com/mxaiorg/kikubot && cd kikubot
+go mod tidy
 ./demo.sh
 ```
 
@@ -125,6 +126,7 @@ Each agent container runs an identical Go binary, parameterised by a shared `con
 A dashboard configuration tool can be found in the scripts directory. It's a web app that lets you configure your deployment: define your agents and optionally configure the included email server.
 
 ```bash
+go mod tidy
 go run ./scripts/configurator  # serves on 127.0.0.1:50042
 ```
 <img src="assets/Configurator.png" alt="kikubot" width="800">
