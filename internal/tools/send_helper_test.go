@@ -186,3 +186,109 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 	}
 	return b
 }
+
+// TestSendEmail_NeverEmptySubject covers every route by which an outbound
+// could previously leave with a blank Subject header. The reported failure
+// was a report_tool reply: report_tool and report_strict_tool have no Subject
+// field in their schemas at all, so when the model omits In-Reply-To (which
+// the schema marks required but nothing enforces), subject resolution fell
+// through to params.Subject — a field the tool can never populate — and the
+// recipient got a subject-less email.
+func TestSendEmail_NeverEmptySubject(t *testing.T) {
+	const parentID = "<parent@agents.mxhero.com>"
+
+	cases := []struct {
+		name string
+		// parent is the email GetEmails returns for In-Reply-To lookups.
+		parent *services.Email
+		// src is the trusted inbound stashed on ctx by HandleMessage.
+		src   *services.Email
+		input map[string]any
+		want  string
+	}{
+		{
+			name:  "new message, no subject, no inbound context",
+			input: map[string]any{"To": "beta@agents.mxhero.com", "Message": "hi"},
+			want:  "Message from Kiku",
+		},
+		{
+			name:  "new message, no subject, inherits inbound thread subject",
+			src:   &services.Email{MessageId: parentID, Subject: "Quarterly numbers"},
+			input: map[string]any{"To": "beta@agents.mxhero.com", "Message": "hi"},
+			want:  "Re: Quarterly numbers",
+		},
+		{
+			name:  "new message, explicit empty subject string",
+			src:   &services.Email{MessageId: parentID, Subject: "Re: Quarterly numbers"},
+			input: map[string]any{"To": "beta@agents.mxhero.com", "Subject": "", "Message": "hi"},
+			want:  "Re: Quarterly numbers",
+		},
+		{
+			name:   "reply to a parent that itself had no subject",
+			parent: &services.Email{MessageId: parentID},
+			src:    &services.Email{MessageId: parentID},
+			input: map[string]any{
+				"To": "beta@agents.mxhero.com", "In-Reply-To": parentID, "Message": "hi",
+			},
+			want: "Message from Kiku",
+		},
+		{
+			name:   "reply to a subject-less parent, thread topic survives",
+			parent: &services.Email{MessageId: parentID},
+			src:    &services.Email{MessageId: parentID, ThreadTopic: "Budget review"},
+			input: map[string]any{
+				"To": "beta@agents.mxhero.com", "In-Reply-To": parentID, "Message": "hi",
+			},
+			want: "Re: Budget review",
+		},
+		{
+			name:   "reply keeps the parent subject without double-prefixing",
+			parent: &services.Email{MessageId: parentID, Subject: "RE: Newsletter draft"},
+			input: map[string]any{
+				"To": "beta@agents.mxhero.com", "In-Reply-To": parentID, "Message": "hi",
+			},
+			want: "RE: Newsletter draft",
+		},
+		{
+			name:   "forward of a subject-less parent",
+			parent: &services.Email{MessageId: parentID},
+			input: map[string]any{
+				"To": "beta@agents.mxhero.com", "X-Forwarded": parentID, "Message": "hi",
+			},
+			want: "Message from Kiku",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := stubMailIO(t)
+			defer restore()
+
+			parent := tc.parent
+			services.GetEmails = func(_ context.Context, _ []string) ([]services.Email, error) {
+				if parent == nil {
+					return nil, nil
+				}
+				return []services.Email{*parent}, nil
+			}
+
+			var sent services.Email
+			services.SendEmail = func(_ context.Context, msg services.Email) error {
+				sent = msg
+				return nil
+			}
+
+			ctx := context.Background()
+			if tc.src != nil {
+				ctx = services.WithSourceEmail(ctx, tc.src)
+			}
+
+			if _, err := sendEmail(ctx, mustJSON(t, tc.input)); err != nil {
+				t.Fatalf("sendEmail returned error: %v", err)
+			}
+			if sent.Subject != tc.want {
+				t.Errorf("subject = %q, want %q", sent.Subject, tc.want)
+			}
+		})
+	}
+}

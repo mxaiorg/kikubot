@@ -785,6 +785,42 @@ func NormalizeSubject(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
+// HasSubject reports whether s carries any actual subject text, as opposed to
+// being empty or nothing but stacked reply/forward prefixes ("Re:", "Fwd: Re:").
+// A prefix-only subject is what you get when you prepend "Re: " to a parent
+// that had no subject of its own, and it reads as blank in every mail client.
+func HasSubject(s string) bool {
+	return NormalizeSubject(s) != ""
+}
+
+// ReplySubject returns the subject to use when replying to a message whose
+// subject is parent: parent itself when it already carries a reply prefix,
+// otherwise "Re: " + parent. It returns "" when parent has no usable subject,
+// so callers fall through to their own fallback instead of emitting a bare
+// "Re:".
+func ReplySubject(parent string) string {
+	parent = strings.TrimSpace(parent)
+	if !HasSubject(parent) {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(parent), "re:") {
+		return parent
+	}
+	return "Re: " + parent
+}
+
+// DefaultSubject is the last-resort subject for an outbound message when
+// neither the caller nor the thread it belongs to yields a usable one. No send
+// path may emit an empty Subject header: mail clients render it as blank,
+// spam filters score it, and a human on the receiving end can't tell the
+// message apart from the rest of their inbox.
+func DefaultSubject() string {
+	if name := strings.TrimSpace(config.AgentName); name != "" {
+		return "Message from " + name
+	}
+	return "(no subject)"
+}
+
 func parseSenders(senders string) []string {
 	if senders == "" {
 		return nil
@@ -918,9 +954,9 @@ var SendEmail = func(ctx context.Context, msg Email) error {
 }
 
 func SendBounce(ctx context.Context, rcvdEmail Email, msg string) error {
-	subject := rcvdEmail.Subject
-	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
-		subject = "Re: " + subject
+	subject := ReplySubject(rcvdEmail.Subject)
+	if subject == "" {
+		subject = DefaultSubject()
 	}
 
 	reply := Email{

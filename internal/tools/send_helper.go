@@ -223,11 +223,9 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 			return "", fmt.Errorf("no reply email found")
 		}
 		replyEmail := replyEmails[0]
-		if strings.HasPrefix(replyEmail.Subject, "Re: ") {
-			subject = replyEmail.Subject
-		} else {
-			subject = "Re: " + replyEmail.Subject
-		}
+		// Empty when the parent itself had no subject — the fallback below
+		// then recovers one from the thread rather than sending a bare "Re:".
+		subject = services.ReplySubject(replyEmail.Subject)
 		content = services.ReplyBody(&replyEmail, params.Message)
 
 		// Threading: when the inbound that triggered this turn (srcEmail)
@@ -261,10 +259,12 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 		fwdEmail := fwdEmails[0]
 		// Adding references to the forwarded email is unusual - but useful for this system's architecture
 		references = append(fwdEmail.References, fwdEmail.MessageId)
-		if strings.HasPrefix(fwdEmail.Subject, "Fwd: ") {
-			subject = fwdEmail.Subject
-		} else {
-			subject = "Fwd: " + fwdEmail.Subject
+		if services.HasSubject(fwdEmail.Subject) {
+			if strings.HasPrefix(strings.ToLower(fwdEmail.Subject), "fwd:") {
+				subject = strings.TrimSpace(fwdEmail.Subject)
+			} else {
+				subject = "Fwd: " + strings.TrimSpace(fwdEmail.Subject)
+			}
 		}
 		content = services.ForwardBody(&fwdEmail, params.Message)
 		// Include original attachments when forwarding
@@ -298,6 +298,33 @@ func sendEmail(ctx context.Context, input json.RawMessage) (string, error) {
 	if subject == "" {
 		subject = params.Subject
 	}
+
+	// Never emit an empty Subject header. The subject is optional in
+	// practice on every tool that reaches here: report_tool and
+	// report_strict_tool have no Subject field at all (they assume the
+	// In-Reply-To parent supplies one, and the model does sometimes omit
+	// In-Reply-To despite the schema), and message_tool's Subject is
+	// routinely left blank when the model considers itself to be replying.
+	// A prefix-only subject ("Re:", inherited from a subject-less parent)
+	// counts as empty. Recover from the trusted inbound that started this
+	// turn — the outbound is already threaded onto it — and only then fall
+	// back to the agent's default.
+	if !services.HasSubject(subject) {
+		subject = ""
+		if srcEmail != nil {
+			for _, candidate := range []string{srcEmail.Subject, srcEmail.ThreadTopic} {
+				if s := services.ReplySubject(candidate); s != "" {
+					subject = s
+					break
+				}
+			}
+		}
+		if subject == "" {
+			subject = services.DefaultSubject()
+		}
+		log.Printf("outbound had no usable subject; using %q", subject)
+	}
+
 	if content == "" {
 		content = params.Message
 	}

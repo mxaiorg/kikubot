@@ -745,9 +745,9 @@ func handleAutoReply(ctx context.Context, email services.Email) {
 		log.Printf("auto-reply: originator %s matches upstream %s; skipping notify to avoid loop",
 			email.From, upstream.From)
 	} else {
-		subj := upstream.Subject
-		if !strings.HasPrefix(strings.ToLower(subj), "re:") {
-			subj = "Re: " + subj
+		subj := services.ReplySubject(upstream.Subject)
+		if subj == "" {
+			subj = services.DefaultSubject()
 		}
 		content := fmt.Sprintf(
 			"I was unable to complete your request. A downstream coworker declined part of the task with the following response:\n\n%s",

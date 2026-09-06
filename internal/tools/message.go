@@ -23,7 +23,7 @@ func MessageTool() ToolDefinition {
 				},
 				"Subject": {
 					"type": "string",
-					"description": "If NOT replying or forwarding, the subject of the email"
+					"description": "Subject line. Required when starting a new thread; when replying or forwarding, the parent thread's subject is reused and this is ignored. Never pass an empty string."
 				},
 				"Message": {
 					"type": "string",
