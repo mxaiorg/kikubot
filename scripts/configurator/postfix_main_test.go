@@ -171,3 +171,67 @@ func boolStr(b bool) string {
 	}
 	return "false"
 }
+
+// TestEnabledIgnoresCommittedMainCf: postfix-main.cf ships in the repo, so a
+// fresh checkout has it on disk with nothing else configured. That must read
+// as "not using the bundled email service" — otherwise the Email Service page
+// starts with "Use this service" ticked on every new install.
+func TestEnabledIgnoresCommittedMainCf(t *testing.T) {
+	root := t.TempDir()
+	dir := dmsConfigDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "transport_maps = texthash:/tmp/docker-mailserver/postfix-transport.cf\nsmtpd_sender_restrictions = permit\n"
+	if err := os.WriteFile(filepath.Join(dir, "postfix-main.cf"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadEmailServiceConfig(root); got.Enabled {
+		t.Errorf("Enabled = true with only the committed postfix-main.cf present, want false")
+	}
+}
+
+// TestDisableMarkerRoundtrip: clearing "Use this service" has to survive the
+// redirect back to the page — the checkbox is re-derived from disk on every
+// GET, and before the marker existed the disabled state had nowhere to live,
+// so saving it looked like a no-op and the box came straight back ticked.
+// Re-enabling must restore the saved field values, not an empty form.
+func TestDisableMarkerRoundtrip(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(dmsConfigDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := &emailServiceConfig{
+		Enabled:         true,
+		AgentDomain:     "agents.example.com",
+		LimitDelivery:   true,
+		DeliveryDomains: []string{"partner.com"},
+	}
+	if err := orig.Save(root); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := loadEmailServiceConfig(root); !got.Enabled {
+		t.Fatalf("Enabled = false right after Save, want true")
+	}
+
+	if err := setEmailServiceDisabled(root, true); err != nil {
+		t.Fatalf("setEmailServiceDisabled(true): %v", err)
+	}
+	got := loadEmailServiceConfig(root)
+	if got.Enabled {
+		t.Errorf("Enabled = true after disabling, want false")
+	}
+	if got.AgentDomain != "agents.example.com" || !stringSliceEqual(got.DeliveryDomains, []string{"partner.com"}) {
+		t.Errorf("disabled config lost its values: AgentDomain = %q, DeliveryDomains = %v", got.AgentDomain, got.DeliveryDomains)
+	}
+
+	// Re-enabling is idempotent even when no marker is left to remove.
+	for i := 0; i < 2; i++ {
+		if err := setEmailServiceDisabled(root, false); err != nil {
+			t.Fatalf("setEmailServiceDisabled(false) #%d: %v", i, err)
+		}
+	}
+	if got := loadEmailServiceConfig(root); !got.Enabled {
+		t.Errorf("Enabled = false after re-enabling, want true")
+	}
+}

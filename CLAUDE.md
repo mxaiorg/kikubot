@@ -24,7 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - **`agent.HandleMessage`** with `MaxTurns` budget and `AgentTimeout` deadline. **Always saves history afterward, even on error**, so partial tool results survive retries.
    - On `ErrMaxTurns`, send a one-shot notice to the sender and mark seen — re-running burns another budget and creates infinite delegation loops.
    - On other errors, leave unseen for the next poll.
-3. **Snooze pump** — drain `services.NextSnoozed()` running each through `agent.HandleSnooze` (which strips `snooze_tool`/`unsnooze_tool` from the toolset for that turn so the model can't re-snooze itself).
+3. **Snooze pump** — drain `services.NextSnoozed()` running each through `agent.HandleSnooze` (which strips `snooze_tool`/`unsnooze_tool` from the toolset for that turn so the model can't re-snooze itself; the read-only `list_snoozed_tool` stays).
 
 ### Agent loop details (`internal/agents/agent.go`)
 
@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Tools (`internal/tools/`)
 
 - **`CoreTools()`** is always loaded: `set_task_status`, `message_tool` (peer-to-peer email), `mbox_search`.
-- **`registry.go`** maps the YAML keys (`report`, `snooze`, `salesforce_mcp`, …) to tool factories. `agents.yaml` lists which keys each agent gets.
+- **`registry.go`** maps the YAML keys (`report`, `snooze`, `salesforce_mcp`, …) to tool factories. `agents.yaml` lists which keys each agent gets. The `snooze` key registers three: `snooze_tool`, `unsnooze_tool`, and the read-only `list_snoozed_tool` (the agent's own schedule — crontab, next run in the task's timezone, Message-Id — since the prompt summary carries neither the crontab nor the next run, and watchdog entries are counted but never listed as cancellable).
 - **MCP bridges** (`mcp_helper.go`):
   - `LocalMCPBridge` — stdio subprocess (npx), one long-lived process per server. Used for `salesforce_mcp`, `box_cli`, `xero_mcp`. The Dockerfile pre-installs these globally so `npx` doesn't fetch at runtime.
   - `MCPBridge` (static `Authorization` header) and `MCPBridgeOAuth` (OAuth2) — remote Streamable HTTP MCP. Both open a **fresh dial per call** (the transport's session/SSE context goes stale between calls). Don't call these directly for new servers — use the declarative `mcp_servers:` table instead (see below).

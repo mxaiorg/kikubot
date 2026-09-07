@@ -26,3 +26,5 @@
 /services/dms/config/rspamd/override.d/dkim_signing.conf
 .idea
 /scripts/configurator/configurator
+# Configurator marker: "Use this service" cleared on the Email Service page.
+/services/dms/.email-service-disabled

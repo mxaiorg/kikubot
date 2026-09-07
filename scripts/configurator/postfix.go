@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,9 +27,61 @@ func dmsConfigDir(root string) string {
 	return filepath.Join(root, "services", "dms", "config")
 }
 
+// emailServiceDisabledPath is the marker written when the operator clears
+// "Use this service" on the Email Service page.
+//
+// The bundled mail server has no single on-disk switch of its own: whether
+// it's in use is otherwise inferred from the generated postfix files. Turning
+// it off can't be represented by writing another postfix file, and deleting
+// the generated ones would throw away the operator's delivery/accept domain
+// lists — so the "off" state gets an explicit marker instead. It lives in
+// services/dms/ rather than services/dms/config/ so it is never mounted into
+// the DMS container.
+func emailServiceDisabledPath(root string) string {
+	return filepath.Join(root, "services", "dms", ".email-service-disabled")
+}
+
+// emailServiceDisabled reports whether the operator has explicitly turned the
+// bundled email service off.
+func emailServiceDisabled(root string) bool {
+	_, err := os.Stat(emailServiceDisabledPath(root))
+	return err == nil
+}
+
+// setEmailServiceDisabled persists the "Use this service" toggle by creating
+// or removing the marker. Creating it leaves every generated postfix file in
+// place, so re-enabling restores the previous settings.
+func setEmailServiceDisabled(root string, disabled bool) error {
+	p := emailServiceDisabledPath(root)
+	if !disabled {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fsWriteError(p, err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(p), err)
+	}
+	body := "# Written by the Agent Configurator when \"Use this service\" is cleared on\n" +
+		"# the Email Service page. Delete this file (or re-enable the service in the\n" +
+		"# configurator) to use the bundled docker-mailserver again. The generated\n" +
+		"# postfix files in config/ are left untouched while this marker exists.\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		return fsWriteError(p, err)
+	}
+	return nil
+}
+
 // loadEmailServiceConfig best-effort reads the current postfix-transport.cf,
 // postfix-sender-access.cf, and postfix-main.cf to populate a config. If none
 // exist, returns a zero-value struct (Enabled=false).
+//
+// Enabled is derived from the two *generated* files only. postfix-main.cf is
+// committed to the repo with an unrestricted default, so it is present on a
+// fresh checkout and says nothing about whether the operator uses the bundled
+// server — treating its presence as "enabled" made the checkbox start ticked
+// on every new install. An explicit disable marker (see
+// setEmailServiceDisabled) overrides both.
 //
 // postfix-main.cf is the authoritative source for LimitAccept because that's
 // the file that actually controls whether Postfix rejects unmatched senders
@@ -51,12 +105,16 @@ func loadEmailServiceConfig(root string) *emailServiceConfig {
 	// to the `.  OK` sentinel heuristic in parseSenderAccess.
 	mainDecided := false
 	if data, err := os.ReadFile(mPath); err == nil {
-		c.Enabled = true
 		mainDecided = c.parseMain(string(data))
 	}
 	if data, err := os.ReadFile(sPath); err == nil {
 		c.Enabled = true
 		c.parseSenderAccess(string(data), mainDecided)
+	}
+	// The values above stay populated so re-enabling the service restores the
+	// operator's previous settings rather than an empty form.
+	if emailServiceDisabled(root) {
+		c.Enabled = false
 	}
 	return c
 }

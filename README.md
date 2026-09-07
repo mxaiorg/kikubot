@@ -356,7 +356,7 @@ A **tool** is anything the agent can call mid-conversation. Each tool is a `Tool
 |------------------------|-------------------------------------------------------------------------------------------------------|
 | `report`               | Send a structured reply to the user (used by coordinators).                                           |
 | `report_strict`        | Send a structured reply to the sender only (used by coordinators). Good for public facing agents.     |
-| `snooze` / `unsnooze`  | Schedule or cancel a recurring/one-off replay of the current message — see **Recurring tasks** below. |
+| `snooze`               | Schedule, cancel, or list recurring/one-off replays of a message — see **Recurring tasks** below.     |
 | `anthropic_web_search` | Anthropic's server-side web search tool. Only works with Anthropic LLMs.                              |
 | `tavily_mcp`           | Tavily web search via MCP.                                                                            |
 | `salesforce_mcp`       | Salesforce CRM via the `@tsmztech/mcp-server-salesforce` MCP server.                                  |
@@ -481,7 +481,7 @@ Read more about tools in the [tools README](internal/tools/README.md)
 
 ## Recurring tasks
 
-Agents can schedule themselves. The `snooze` / `unsnooze` tools (registered via the `snooze` and `unsnooze` keys in `agents.yaml`) let an agent park the current email and replay it on a cron schedule.
+Agents can schedule themselves. The `snooze` key in `agents.yaml` registers three tools — `snooze_tool`, `unsnooze_tool`, and `list_snoozed_tool` — that let an agent park the current email, replay it on a cron schedule, and read its own schedule back.
 
 **How it works:**
 
@@ -490,6 +490,7 @@ Agents can schedule themselves. The `snooze` / `unsnooze` tools (registered via 
 3. Every poll cycle (30s), the main loop drains all snoozes whose next-run time has passed. For each, it re-fetches the original email by Message-Id, prepends a system note ("This email is being replayed as a previously scheduled task — do NOT snooze again"), and runs `agent.HandleMessage`. The `snooze_tool` and `unsnooze_tool` are stripped from the toolset for that replay so the model can't re-schedule itself into a loop.
 4. After successful execution: `Once: true` snoozes are deleted; recurring snoozes advance to the next cron-computed run time.
 5. To cancel, the agent calls `unsnooze_tool` with the Message-Id. The system prompt also surfaces any active snoozes for the current thread so a follow-up "stop the daily report" maps to the right cancellation.
+6. To answer "what have you got scheduled?" or "when exactly does that run?", the agent calls `list_snoozed_tool` (no arguments). It returns every scheduled task — description, subject, crontab, next run time in the task's own timezone, and Message-Id — soonest first. The prompt summary names the active tasks but not their schedules, and it is stripped along with the snooze tools during a replay, so this is the only way to read back the exact crontab. Internal watchdog timers are counted but not listed: they aren't tasks anyone scheduled, and cancelling one would disarm the stuck-task safety net.
 
 **Timezone handling.** The crontab is interpreted in the *user's* timezone, extracted from the original email's `Date:` header. So `0 7 * * *` means 7 AM in the sender's local time even if the server runs in UTC. Both IANA names (`America/New_York`) and fixed offsets (`-0500`) are supported.
 
@@ -498,6 +499,7 @@ Agents can schedule themselves. The `snooze` / `unsnooze` tools (registered via 
 - *"Send me the social-media metrics every Monday at 9am."* → `0 9 * * 1`, `Once: false`
 - *"Remind me about the contract review tomorrow at 2pm."* → one-off with `Once: true`
 - *"Stop the daily standup digest."* → triggers `unsnooze_tool` against the matching active snooze
+- *"What do you have scheduled?"* / *"What time does the Monday report go out?"* → `list_snoozed_tool`
 
 The scheduler is single-process and file-backed — no external dependencies. If you run an agent across multiple replicas, only one should own the snooze file (mount it on a single volume or run a single instance per inbox).
 

@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -32,11 +33,17 @@ func (s *server) render(w http.ResponseWriter, r *http.Request, name string, p p
 
 const flashCookie = "ac_flash"
 
+// setFlash stashes a one-shot "<kind>\x1f<message>" pair in a cookie for the
+// page rendered after a redirect.
+//
+// The pair is percent-encoded: net/http silently drops cookie bytes outside
+// 0x20-0x7E, which ate both the \x1f separator (leaving readFlash unable to
+// split, so *no* flash ever rendered) and any non-ASCII character in a
+// message.
 func setFlash(w http.ResponseWriter, kind, msg string) {
-	v := kind + "\x1f" + msg
 	http.SetCookie(w, &http.Cookie{
 		Name:  flashCookie,
-		Value: v,
+		Value: url.QueryEscape(kind + "\x1f" + msg),
 		Path:  "/",
 	})
 }
@@ -47,7 +54,11 @@ func readFlash(r *http.Request, w http.ResponseWriter) (msg, kind string) {
 		return "", ""
 	}
 	http.SetCookie(w, &http.Cookie{Name: flashCookie, Value: "", Path: "/", MaxAge: -1})
-	parts := strings.SplitN(c.Value, "\x1f", 2)
+	v, err := url.QueryUnescape(c.Value)
+	if err != nil {
+		return "", ""
+	}
+	parts := strings.SplitN(v, "\x1f", 2)
 	if len(parts) != 2 {
 		return "", ""
 	}
@@ -341,8 +352,18 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 			if c.AgentDomain == "" {
 				c.AgentDomain = hostnameDomain(c.Hostname)
 			}
+			// Re-render (rather than redirect) so a rejected save — an empty
+			// agent domain, an unwritable config dir — keeps the submitted
+			// values, including the "Use this service" tick itself, which a
+			// redirect would drop on the floor when nothing reached disk.
 			if err := c.Save(s.root); err != nil {
-				setFlash(w, "error", "Save failed: "+err.Error())
+				s.renderEmailService(w, r, c, "error", "Save failed: "+err.Error())
+				return
+			}
+			// The config is on disk now, so the service is in use: clear any
+			// marker left by an earlier "Use this service" opt-out.
+			if err := setEmailServiceDisabled(s.root, false); err != nil {
+				setFlash(w, "error", "Postfix saved, but clearing the disabled marker failed: "+err.Error())
 				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
 				return
 			}
@@ -374,7 +395,18 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 			}
 			setFlash(w, "success", msg)
 		} else {
-			setFlash(w, "success", "Email service disabled (no files were modified)")
+			// Nothing below the checkbox was submitted (the fieldset is
+			// disabled), so record the opt-out itself — without it the next
+			// GET would re-derive Enabled from the generated postfix files
+			// and tick the box straight back on. On failure redirect rather
+			// than re-render: `c` carries no field values worth preserving,
+			// and a fresh load shows the still-enabled state that's on disk.
+			if err := setEmailServiceDisabled(s.root, true); err != nil {
+				setFlash(w, "error", "Save failed: "+err.Error())
+				http.Redirect(w, r, "/email-service", http.StatusSeeOther)
+				return
+			}
+			setFlash(w, "success", "Email service disabled. The generated files under services/dms/config/ were left untouched — re-enable this page to use them again.")
 		}
 		http.Redirect(w, r, "/email-service", http.StatusSeeOther)
 		return
@@ -389,6 +421,20 @@ func (s *server) handleEmailService(w http.ResponseWriter, r *http.Request) {
 		DKIM:               loadDKIMStatus(s.root, c.AgentDomain),
 	}
 	s.render(w, r, "email_service", pageData{Active: "email", Data: view})
+}
+
+// renderEmailService renders the Email Service page from an in-flight config
+// (the values just submitted) rather than from disk, flagging the form dirty
+// when those values differ from what's stored so the Save button stays live
+// for an immediate retry.
+func (s *server) renderEmailService(w http.ResponseWriter, r *http.Request, c *emailServiceConfig, flashKind, flashMsg string) {
+	view := emailServiceView{
+		emailServiceConfig: c,
+		SSL:                loadSSLCertStatus(s.root),
+		DKIM:               loadDKIMStatus(s.root, c.AgentDomain),
+		Dirty:              !emailServiceConfigEqual(c, loadEmailServiceConfig(s.root)),
+	}
+	s.render(w, r, "email_service", pageData{Active: "email", Data: view, Flash: flashMsg, FlashKind: flashKind})
 }
 
 // handleEmailServiceCert generates a self-signed cert from the submitted
@@ -429,13 +475,7 @@ func (s *server) handleEmailServiceCert(w http.ResponseWriter, r *http.Request) 
 		flashMsg = "Generated self-signed certificate in services/dms/certs/ and set common.email_insecure_tls=true in agents.yaml."
 	}
 
-	view := emailServiceView{
-		emailServiceConfig: c,
-		SSL:                loadSSLCertStatus(s.root),
-		DKIM:               loadDKIMStatus(s.root, domain),
-		Dirty:              !emailServiceConfigEqual(c, loadEmailServiceConfig(s.root)),
-	}
-	s.render(w, r, "email_service", pageData{Active: "email", Data: view, Flash: flashMsg, FlashKind: flashKind})
+	s.renderEmailService(w, r, c, flashKind, flashMsg)
 }
 
 // emailServiceConfigEqual reports whether two configs are field-for-field
