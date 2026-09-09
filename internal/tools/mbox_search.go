@@ -13,11 +13,17 @@ import (
 
 func MboxSearchTool() ToolDefinition {
 	return ToolDefinition{
-		Name:        "mailbox_search",
-		Description: "Search through your mailbox for emails matching the given criteria.",
+		Name: "mailbox_search",
+		Description: "Search through your mailbox for emails matching the given criteria. " +
+			"Searches your INBOX by default; set folder to \"sent\" to search messages you have sent.",
 		InputSchema: []byte(`{
 			"type": "object",
 			"properties": {
+				"folder": {
+					"type": "string",
+					"enum": ["inbox", "sent"],
+					"description": "Which mailbox to search. \"inbox\" (default) = mail you received. \"sent\" = mail you sent, as it was actually delivered — use this to verify what a message really contained, including its final To/Cc headers, which may differ from what you passed to a send tool."
+				},
 				"from": {
 					"type": "string",
 					"description": "Filter by sender email address or name"
@@ -60,6 +66,7 @@ func MboxSearchTool() ToolDefinition {
 // Returns a JSON array of email messages.
 func searchMbox(ctx context.Context, input json.RawMessage) (string, error) {
 	var params struct {
+		Folder         string `json:"folder"`
 		From           string `json:"from"`
 		To             string `json:"to"`
 		Subject        string `json:"subject"`
@@ -74,6 +81,7 @@ func searchMbox(ctx context.Context, input json.RawMessage) (string, error) {
 	}
 
 	search := services.MailSearch{
+		Folder:         params.Folder,
 		From:           params.From,
 		To:             params.To,
 		Subject:        params.Subject,
@@ -106,7 +114,11 @@ func searchMbox(ctx context.Context, input json.RawMessage) (string, error) {
 	}
 
 	if len(emails) == 0 {
-		return "No emails found matching the given criteria.", nil
+		folder := params.Folder
+		if folder == "" {
+			folder = services.MailFolderInbox
+		}
+		return fmt.Sprintf("No emails found in %s matching the given criteria.", folder), nil
 	}
 
 	// Project to a slim shape — never serialize raw attachment bytes here.

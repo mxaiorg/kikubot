@@ -1227,9 +1227,43 @@ type MailSearch struct {
 	Unread         bool
 	Starred        bool
 	HasAttachments bool
+	// Folder selects the mailbox to search. Use the MailFolder* constants;
+	// empty means MailFolderInbox. Anything else is rejected rather than
+	// passed to IMAP — the value reaches here from LLM tool input, and an
+	// arbitrary string would let the model select mailboxes this API was
+	// never meant to expose.
+	Folder string
+}
+
+// Logical mailbox names accepted in MailSearch.Folder. They are indirections,
+// not IMAP folder names: the concrete names come from config.InboxFolder and
+// config.SentFolder, which are deployment-configurable.
+const (
+	MailFolderInbox = "inbox"
+	MailFolderSent  = "sent"
+)
+
+// resolveMailFolder maps a logical MailSearch.Folder value to the configured
+// IMAP folder name. Returns an error for anything unrecognised.
+func resolveMailFolder(folder string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(folder)) {
+	case "", MailFolderInbox:
+		return config.InboxFolder, nil
+	case MailFolderSent:
+		return config.SentFolder, nil
+	default:
+		return "", fmt.Errorf("unknown folder %q (expected %q or %q)",
+			folder, MailFolderInbox, MailFolderSent)
+	}
 }
 
 func MailBoxSearch(ctx context.Context, search MailSearch) ([]Email, error) {
+	// Validate before dialing so a bad folder costs no IMAP connection.
+	folder, err := resolveMailFolder(search.Folder)
+	if err != nil {
+		return nil, err
+	}
+
 	//goland:noinspection GoResourceLeak
 	c, err := dialServer(ctx)
 	if err != nil {
@@ -1237,9 +1271,9 @@ func MailBoxSearch(ctx context.Context, search MailSearch) ([]Email, error) {
 	}
 	defer c.Logout()
 
-	_, err = c.Select(config.InboxFolder, true)
+	_, err = c.Select(folder, true)
 	if err != nil {
-		return nil, fmt.Errorf("selecting INBOX: %w", err)
+		return nil, fmt.Errorf("selecting %s: %w", folder, err)
 	}
 
 	criteria := imap.NewSearchCriteria()
