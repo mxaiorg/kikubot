@@ -392,22 +392,41 @@ var commaSplitReg = regexp.MustCompile(`\s*,\s*`)
 // thread Message-Id with the recipient address, we walk References
 // newest→oldest to find the most recent human sender and substitute their
 // address. Scoped to report_tool (not send_message) so legitimate
-// peer-to-peer replies are untouched.
+// peer-to-peer replies are untouched. Any substitution is reported back in
+// the tool result so the model cannot claim a delivery that did not happen.
 func sendReportEmail(ctx context.Context, input json.RawMessage) (string, error) {
-	healed, err := healReportRecipient(ctx, input)
+	healed, note, err := healReportRecipient(ctx, input)
 	if err != nil {
 		return "", err
 	}
-	return sendEmail(ctx, healed)
+	res, err := sendEmail(ctx, healed)
+	if err != nil {
+		return "", err
+	}
+	if note != "" {
+		// Never let a rewrite be silent. The model composed the call with a
+		// specific recipient; if heal changed it, a bare "Success" makes the
+		// agent go on to tell the user it delivered to an address that was
+		// removed before the SMTP hand-off.
+		return res + "\n\nNOTE: " + note, nil
+	}
+	return res, nil
 }
 
 // healReportRecipient returns tool input with a corrected "To" for
-// report_tool replies. The strategy is membership-based, not equality-
-// based: we collect every non-agent participant in the thread and trust
-// the LLM's To when every recipient belongs to that set. Multi-party
-// threads can have several legitimate reply targets (original requester
-// + follow-up correspondent), and forcing equality with the most-recent
-// human would substitute one valid choice for another.
+// report_tool replies, plus a human-readable note describing any
+// substitution it made (empty when the input was left alone). The caller
+// must surface that note to the model: a silent rewrite leaves the agent
+// believing it delivered to the address it chose, and it will say so to
+// the user.
+//
+// The strategy is membership-based, not equality-based: a recipient is
+// trusted when it is either a non-agent participant in the thread or an
+// explicit address entry in the agent's whitelist (see
+// allRecipientsAllowed). Multi-party threads can have several legitimate
+// reply targets (original requester + follow-up correspondent), and
+// forcing equality with the most-recent human would substitute one valid
+// choice for another.
 //
 // Heal only intervenes when a recipient clearly doesn't belong to the
 // thread, which catches three common LLM failures with one mechanism:
@@ -420,19 +439,19 @@ func sendReportEmail(ctx context.Context, input json.RawMessage) (string, error)
 // New emails (no In-Reply-To) are untouched — the LLM may legitimately
 // be sending to a third party. Peer-to-peer delegation goes through
 // sendEmailInternal and does not reach this function.
-func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
+func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMessage, string, error) {
 	var params sendMailMsg
 	if err := json.Unmarshal(input, &params); err != nil {
-		return input, nil // let sendEmail emit its own parse error
+		return input, "", nil // let sendEmail emit its own parse error
 	}
 	if params.InReplyTo == "" {
-		return input, nil
+		return input, "", nil
 	}
 
 	inReplyTo := services.EnsureAngleBrackets(params.InReplyTo)
 	replyEmails, err := services.GetEmails(ctx, []string{inReplyTo})
 	if err != nil || len(replyEmails) == 0 {
-		return input, nil // let sendEmail raise the real error
+		return input, "", nil // let sendEmail raise the real error
 	}
 	replyEmail := replyEmails[0]
 
@@ -459,8 +478,8 @@ func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMe
 	// in when a recipient clearly doesn't belong (typoed domain, stale
 	// address, Message-Id pasted as To).
 	humans := collectHumansInThread(ctx, seed)
-	if len(humans) > 0 && allRecipientsInHumans(toRecipients, humans) {
-		return input, nil
+	if allRecipientsAllowed(toRecipients, humans) {
+		return input, "", nil
 	}
 
 	// Fallback: identify the newest human for substitution, and detect
@@ -476,33 +495,46 @@ func healReportRecipient(ctx context.Context, input json.RawMessage) (json.RawMe
 		// No human resolvable from the thread. If the To also looks like
 		// a Message-Id, there's no safe answer — force the LLM to retry.
 		if conflation {
-			return nil, fmt.Errorf(
+			return nil, "", fmt.Errorf(
 				"report_tool: To %v matches a thread Message-Id (likely confused with In-Reply-To); no human sender resolvable from References. Re-issue with the user's email address in To",
 				toRecipients,
 			)
 		}
 		// Otherwise trust the LLM — thread may be all-agent and the model
 		// knows the right external address.
-		return input, nil
+		return input, "", nil
 	}
 
 	// Human found, and it isn't in the LLM's To. Substitute the thread's
 	// human as the sole recipient. Multi-recipient user replies are rare
 	// and the LLM can include the human explicitly when it wants one.
+	var note string
 	switch {
 	case params.To == "":
 		log.Printf("report_tool: To empty; setting to thread-derived recipient %q", human)
+		note = fmt.Sprintf("To was empty and was set to %q, the most recent human in this thread.", human)
 	case conflation:
 		log.Printf("report_tool: To (%v) matches a thread Message-Id; substituting thread-derived recipient %q", toRecipients, human)
+		note = fmt.Sprintf(
+			"To (%s) was a thread Message-Id, not an address; it was replaced with %q, the most "+
+				"recent human in this thread. The email did NOT go to the address you specified.",
+			strings.Join(toRecipients, ", "), human)
 	default:
 		log.Printf("report_tool: To (%v) does not match thread-derived recipient %q (likely wrong domain); substituting", toRecipients, human)
+		note = fmt.Sprintf(
+			"To (%s) was replaced with %q: that address has not sent into this thread and is not "+
+				"listed by address in this agent's whitelist, so it was treated as a typo. The "+
+				"email did NOT go to the address you specified. If it was in fact correct, tell "+
+				"the user it could not be delivered and that an operator needs to add it to the "+
+				"agent's whitelist — do not claim the message was sent there.",
+			strings.Join(toRecipients, ", "), human)
 	}
 	params.To = human
 	out, marshalErr := json.Marshal(params)
 	if marshalErr != nil {
-		return input, nil
+		return input, "", nil
 	}
-	return out, nil
+	return out, note, nil
 }
 
 // collectHumansInThread returns the set of non-agent sender addresses
@@ -548,12 +580,30 @@ func collectHumansInThread(ctx context.Context, seed *services.Email) map[string
 	return humans
 }
 
-// allRecipientsInHumans reports whether every entry in `to` resolves to
-// an address present in `humans`. Returns false on empty input so the
-// caller falls through to the substitute path. Recipients are parsed as
-// RFC 5322 addresses when possible; raw strings are lower-cased as a
-// fallback so a bare "user@host" is matched.
-func allRecipientsInHumans(to []string, humans map[string]bool) bool {
+// allRecipientsAllowed reports whether every entry in `to` is a
+// legitimate report recipient. Two independent sources of truth qualify
+// an address:
+//
+//   - it has sent into this thread (`humans`, from collectHumansInThread), or
+//   - it is listed *by address* in this agent's whitelist.
+//
+// The whitelist arm exists because thread membership alone cannot express
+// "this person should receive reports but hasn't spoken yet". A recipient
+// configured in the knowledge base (e.g. a daily report addressed to a
+// seller who only ever reads) is indistinguishable from a hallucinated
+// address under the thread test, and heal would silently redirect it to
+// whoever last spoke — which is exactly how a daily report addressed to
+// the seller got re-pointed at the CC'd requester instead.
+//
+// Only exact-address whitelist entries count; bare-domain entries (e.g.
+// "agents.blacklich.com") are deliberately ignored here so that heal keeps
+// catching local-part typos within an otherwise-trusted domain.
+//
+// Returns false on empty input so the caller falls through to the
+// substitute path. Recipients are parsed as RFC 5322 addresses when
+// possible; raw strings are lower-cased as a fallback so a bare
+// "user@host" is matched.
+func allRecipientsAllowed(to []string, humans map[string]bool) bool {
 	if len(to) == 0 {
 		return false
 	}
@@ -565,11 +615,32 @@ func allRecipientsInHumans(to []string, humans map[string]bool) bool {
 		if addr == "" {
 			return false
 		}
-		if !humans[addr] {
+		if !humans[addr] && !whitelistedAddress(addr) {
 			return false
 		}
 	}
 	return true
+}
+
+// whitelistedAddress reports whether addr appears as an explicit address
+// entry in the agent's whitelist. Bare-domain entries are ignored: they
+// are a coarse inbound-ACL grant, and treating them as an outbound
+// recipient allowlist would disable typo detection for every address at
+// that domain. addr is expected to be already lowercased and bare.
+func whitelistedAddress(addr string) bool {
+	if addr == "" {
+		return false
+	}
+	for _, w := range config.Whitelist {
+		w = strings.TrimSpace(w)
+		if !strings.Contains(w, "@") {
+			continue // domain-only entry — not an outbound recipient grant
+		}
+		if strings.EqualFold(w, addr) {
+			return true
+		}
+	}
+	return false
 }
 
 // knownPeerEmails returns a sorted list of agent emails in

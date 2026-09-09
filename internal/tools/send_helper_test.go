@@ -292,3 +292,60 @@ func TestSendEmail_NeverEmptySubject(t *testing.T) {
 		})
 	}
 }
+
+// TestAllRecipientsAllowed_WhitelistedNonParticipant locks in the fix for
+// the silently-redirected daily report: a recipient configured in the
+// agent's whitelist (and named by the knowledge base) is a legitimate
+// report target even though it has never sent into the thread. Before the
+// fix, heal treated it as a typo and substituted the last human to speak,
+// so the report went to the CC'd requester instead of the seller.
+func TestAllRecipientsAllowed_WhitelistedNonParticipant(t *testing.T) {
+	origWhitelist := config.Whitelist
+	defer func() { config.Whitelist = origWhitelist }()
+	config.Whitelist = []string{"agents.blacklich.com", "apanagides@gmail.com", "oliverpanagides@gmail.com"}
+
+	// Only the requester has spoken in this thread.
+	humans := map[string]bool{"apanagides@gmail.com": true}
+
+	cases := []struct {
+		name string
+		to   []string
+		want bool
+	}{
+		{"whitelisted non-participant", []string{"oliverpanagides@gmail.com"}, true},
+		{"thread participant", []string{"apanagides@gmail.com"}, true},
+		{"both", []string{"oliverpanagides@gmail.com", "apanagides@gmail.com"}, true},
+		{"display name form", []string{`"Oliver" <oliverpanagides@gmail.com>`}, true},
+		{"case insensitive", []string{"OliverPanagides@Gmail.com"}, true},
+		{"unknown address still healed", []string{"stranger@gmail.com"}, false},
+		{"one bad recipient fails the set", []string{"oliverpanagides@gmail.com", "stranger@gmail.com"}, false},
+		{"empty", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := allRecipientsAllowed(tc.to, humans); got != tc.want {
+				t.Fatalf("allRecipientsAllowed(%v) = %v, want %v", tc.to, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWhitelistedAddress_IgnoresBareDomains ensures a domain-only whitelist
+// entry (a coarse inbound-ACL grant) does not become an outbound recipient
+// allowlist — otherwise heal would stop catching local-part typos at every
+// whitelisted domain, which is most of what it exists for.
+func TestWhitelistedAddress_IgnoresBareDomains(t *testing.T) {
+	origWhitelist := config.Whitelist
+	defer func() { config.Whitelist = origWhitelist }()
+	config.Whitelist = []string{"agents.blacklich.com", "oliverpanagides@gmail.com"}
+
+	if whitelistedAddress("typo@agents.blacklich.com") {
+		t.Fatal("bare-domain whitelist entry must not authorize an arbitrary address at that domain")
+	}
+	if !whitelistedAddress("oliverpanagides@gmail.com") {
+		t.Fatal("explicit address entry should be authorized")
+	}
+	if whitelistedAddress("") {
+		t.Fatal("empty address should never be authorized")
+	}
+}
