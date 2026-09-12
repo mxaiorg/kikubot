@@ -35,11 +35,11 @@
             <span class="hint">— no agent yet</span>
           {{end}}
         </td>
-        <td>
-          <a class="primary" href="/mcp/edit?key={{.Key}}">Edit</a>
+        <td class="row-actions">
+          <a href="/mcp/edit?key={{.Key}}">edit</a>
           <form method="post" action="/mcp/delete" class="inline" onsubmit="return confirm('Remove MCP server {{.Key}}?{{if .UsedBy}} It will also be removed from the tools of: {{join (agentNames .UsedBy) ", "}}.{{end}}');">
             <input type="hidden" name="key" value="{{.Key}}">
-            <button type="submit" class="ghost danger">Delete</button>
+            <button type="submit" class="link danger">delete</button>
           </form>
         </td>
       </tr>

@@ -206,7 +206,21 @@ button:disabled, button.primary:disabled {
 .table { width: 100%; border-collapse: collapse; }
 /* Wide tables (MCP servers) scroll inside the card rather than the page. */
 .table-scroll { overflow-x: auto; }
-.table-scroll .badge { white-space: normal; }
+.table-scroll .badge { white-space: normal; text-align: center; }
+/* Row actions rendered as plain text links (no button chrome to overlap). */
+.row-actions { white-space: nowrap; }
+.row-actions form.inline { margin-left: 10px; }
+button.link, button.link.danger {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--accent);
+  border-radius: 0;
+}
+button.link.danger { color: var(--danger); }
+button.link:hover, button.link.danger:hover { background: transparent; color: inherit; text-decoration: underline; }
+button.link.danger:hover { color: var(--danger); }
 .table th, .table td {
   text-align: left;
   padding: 9px 12px;
