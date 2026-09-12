@@ -37,7 +37,7 @@
         </td>
         <td class="row-actions">
           <a href="/mcp/edit?key={{.Key}}">edit</a>
-          <form method="post" action="/mcp/delete" class="inline" onsubmit="return confirm('Remove MCP server {{.Key}}?{{if .UsedBy}} It will also be removed from the tools of: {{join (agentNames .UsedBy) ", "}}.{{end}}');">
+          <form method="post" action="/mcp/delete" class="inline" data-no-dirty onsubmit="return confirm('Remove MCP server {{.Key}}?{{if .UsedBy}} It will also be removed from the tools of: {{join (agentNames .UsedBy) ", "}}.{{end}}');">
             <input type="hidden" name="key" value="{{.Key}}">
             <button type="submit" class="link danger">delete</button>
           </form>

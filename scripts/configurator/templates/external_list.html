@@ -24,7 +24,7 @@
         </td>
         <td>
           <a class="primary" href="/agents/external/edit?email={{.Email}}">Edit</a>
-          <form method="post" action="/agents/external/delete" class="inline" onsubmit="return confirm('Remove external partner {{.Email}}?');">
+          <form method="post" action="/agents/external/delete" class="inline" data-no-dirty onsubmit="return confirm('Remove external partner {{.Email}}?');">
             <input type="hidden" name="email" value="{{.Email}}">
             <button type="submit" class="ghost danger">Delete</button>
           </form>
