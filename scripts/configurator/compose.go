@@ -98,6 +98,11 @@ func regenerateCompose(root string) error {
 	if err != nil {
 		return err
 	}
+	// The catalog is bind-mounted below; make sure the host side is a file,
+	// otherwise Docker would create a directory at that path.
+	if err := ensureMCPServersFile(root); err != nil {
+		return err
+	}
 	emailHost := emailServerHost(root)
 
 	var b strings.Builder
@@ -123,6 +128,13 @@ func regenerateCompose(root string) error {
 		// without rebuilding the image; the agent hot-reloads on change
 		// (poll + SIGHUP).
 		b.WriteString("      - ./configs/knowledge:/app/knowledge:ro\n")
+		// Live-mount the roster and the remote-MCP catalog too: the agent
+		// hot-reloads its tool set when either file changes (poll + SIGHUP),
+		// so assigning a tool or editing an MCP server needs no rebuild.
+		// Other agents.yaml fields (model, prompt, ACL) are still read only
+		// at startup.
+		b.WriteString("      - ./configs/agents.yaml:/app/agents.yaml:ro\n")
+		b.WriteString("      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro\n")
 	}
 
 	return fsWriteError(composePath(root), os.WriteFile(composePath(root), []byte(b.String()), 0o644))

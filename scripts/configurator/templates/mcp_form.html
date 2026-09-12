@@ -1,0 +1,96 @@
+{{define "mcp_form"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+{{with .Data}}
+<header class="page-header">
+  <h1>{{if .OriginalKey}}Edit MCP Server{{else}}Add MCP Server{{end}}</h1>
+  <p class="lead">A remote (Streamable HTTP) MCP server. The row is saved to <code>configs/mcp_servers.yaml</code>; secret <em>values</em> go to <code>configs/secrets.env</code> under the env-var names you give here. Assign the key to an agent under its <em>Tools</em> to use it.</p>
+</header>
+<form class="card" method="post" action="/mcp/save">
+  <input type="hidden" name="original_key" value="{{.OriginalKey}}">
+  <div class="grid">
+    <label><span class="field-label">Key {{infoIcon "The tool key agents list under tools:, and the prefix on the server's tool names. Letters, digits, '_' and '-' only. Renaming updates every agent that uses it."}}</span>
+      <input name="key" value="{{.Key}}" required placeholder="tavily_mcp" pattern="[A-Za-z0-9_\-]+">
+    </label>
+    <label><span class="field-label">Auth {{infoIcon "none: no auth header. bearer: Authorization: Bearer <token>. apikey: Authorization: ApiKey <token> (or a custom header with the raw token). oauth2: OAuth2 with automatic refresh; needs app credentials plus a hand-seeded token file."}}</span>
+      <select name="auth" id="mcp-auth">
+        <option value="none" {{if eq .Auth "none"}}selected{{end}}>none</option>
+        <option value="bearer" {{if eq .Auth "bearer"}}selected{{end}}>bearer</option>
+        <option value="apikey" {{if eq .Auth "apikey"}}selected{{end}}>apikey</option>
+        <option value="oauth2" {{if eq .Auth "oauth2"}}selected{{end}}>oauth2</option>
+      </select>
+    </label>
+    <label class="full"><span class="field-label">URL {{infoIcon "The server's Streamable HTTP MCP endpoint."}}</span>
+      <input name="url" value="{{.URL}}" type="url" required placeholder="https://mcp.example.com/mcp">
+    </label>
+    <label class="full"><span class="field-label">Description {{infoIcon "Shown as the tool's description in the agent form's tool picker."}}</span>
+      <input name="description" value="{{.Description}}" placeholder="Tavily web search — runs web searches and returns extracted content.">
+    </label>
+  </div>
+
+  <fieldset class="subcard" data-auth-only="bearer,apikey">
+    <legend>Static token</legend>
+    <p class="hint">The token is sent on every request as a fixed header. Only the env-var <em>name</em> is written to <code>mcp_servers.yaml</code>; the value goes to <code>secrets.env</code>.</p>
+    <div class="grid">
+      <label><span class="field-label">Token env var {{infoIcon "Name of the secrets.env variable holding the token, e.g. TAVILY_API_KEY."}}</span>
+        <input name="token_env" value="{{.TokenEnv}}" placeholder="TAVILY_API_KEY" pattern="[A-Za-z_][A-Za-z0-9_]*">
+      </label>
+      <label><span class="field-label">Token value {{infoIcon "The secret itself, stored in configs/secrets.env under the env var above. Leave blank to keep the current value."}}</span>
+        <div class="secret-input">
+          <input name="token_value" value="{{.TokenValue}}" type="password" autocomplete="new-password" placeholder="leave blank to keep current">
+          <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
+        </div>
+      </label>
+      <label><span class="field-label">Header (optional) {{infoIcon "Header name carrying the credential. Defaults to Authorization. Set e.g. X-Api-Key for servers that want the key in their own header — the token is then sent raw, with no scheme."}}</span>
+        <input name="header" value="{{.Header}}" placeholder="Authorization">
+      </label>
+      <label><span class="field-label">Scheme (optional) {{infoIcon "Prefix before the token in the header. Defaults to Bearer for bearer and ApiKey for apikey (when the header is Authorization)."}}</span>
+        <input name="scheme" value="{{.Scheme}}" id="mcp-scheme" placeholder="Bearer">
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="subcard" data-auth-only="oauth2">
+    <legend>OAuth2</legend>
+    <p class="hint">App credentials come from <code>secrets.env</code>. The access + refresh token pair is <strong>not</strong> stored there — it must be hand-seeded once per agent into <code>data/&lt;agent&gt;/oauth/&lt;key&gt;.json</code> (a JSON object with <code>access_token</code>, <code>token_type: "Bearer"</code>, <code>refresh_token</code>, <code>expires_at</code>). Set <code>expires_at</code> in the past to force a refresh on first use; kikubot rotates and rewrites the file from then on.</p>
+    <div class="grid">
+      <label><span class="field-label">Client ID env var {{infoIcon "Name of the secrets.env variable holding the OAuth client ID, e.g. BOX_CLIENT_ID."}}</span>
+        <input name="client_id_env" value="{{.ClientIDEnv}}" placeholder="BOX_CLIENT_ID" pattern="[A-Za-z_][A-Za-z0-9_]*">
+      </label>
+      <label><span class="field-label">Client ID value {{infoIcon "Stored in configs/secrets.env under the env var above. Leave blank to keep the current value."}}</span>
+        <div class="secret-input">
+          <input name="client_id_value" value="{{.ClientIDValue}}" type="password" autocomplete="new-password" placeholder="leave blank to keep current">
+          <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
+        </div>
+      </label>
+      <label><span class="field-label">Client secret env var (optional) {{infoIcon "Name of the secrets.env variable holding the OAuth client secret, e.g. BOX_CLIENT_SECRET. Public clients can leave this blank."}}</span>
+        <input name="client_secret_env" value="{{.ClientSecretEnv}}" placeholder="BOX_CLIENT_SECRET" pattern="[A-Za-z_][A-Za-z0-9_]*">
+      </label>
+      <label><span class="field-label">Client secret value {{infoIcon "Stored in configs/secrets.env under the env var above. Leave blank to keep the current value."}}</span>
+        <div class="secret-input">
+          <input name="client_secret_value" value="{{.ClientSecretValue}}" type="password" autocomplete="new-password" placeholder="leave blank to keep current">
+          <button type="button" class="secret-toggle" aria-label="Show value">Show</button>
+        </div>
+      </label>
+      <label class="full"><span class="field-label">Metadata URL (optional) {{infoIcon "Pins the OAuth authorization-server metadata endpoint when discovery from the MCP URL fails."}}</span>
+        <input name="metadata_url" value="{{.MetadataURL}}" type="url" placeholder="https://account.example.com/.well-known/oauth-authorization-server">
+      </label>
+    </div>
+    {{if .TokenMissing}}
+    <div class="warn-banner">⚠️ No seeded token file for: {{join .TokenMissing ", "}}. Create <code>data/&lt;agent&gt;/oauth/{{.Key}}.json</code> for each, or the tool stays unavailable to them.</div>
+    {{end}}
+  </fieldset>
+
+  {{if .OriginalKey}}
+  <p class="hint">Used by:
+    {{if .UsedBy}}{{range $i, $a := .UsedBy}}{{if $i}}, {{end}}<a href="/agents/edit?email={{$a.Email}}">{{$a.Name}}</a>{{end}} — these agents reload the server live after you save.
+    {{else}}no agent yet. Assign <code>{{.Key}}</code> under an agent's <em>Tools</em>.{{end}}
+  </p>
+  {{end}}
+
+  <div class="actions">
+    <button type="submit" class="primary">Save MCP server</button>
+    <a class="ghost" href="/mcp">Cancel</a>
+  </div>
+</form>
+{{end}}
+{{end}}

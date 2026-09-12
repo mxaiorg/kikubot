@@ -23,6 +23,11 @@ services:
       # Live-mount the knowledge base so edits (e.g. via the configurator) are
       # picked up without rebuilding the image; the agent hot-reloads on change.
       - ./configs/knowledge:/app/knowledge:ro
+      # Likewise the roster and the remote-MCP catalog: tool assignments
+      # (agents.yaml tools:) and MCP server rows hot-reload too. Other
+      # agents.yaml fields (model, prompt, ACL) still need a restart.
+      - ./configs/agents.yaml:/app/agents.yaml:ro
+      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
 
 #  beta:
 #    build: .
@@ -38,6 +43,8 @@ services:
 #    volumes:
 #      - ./data/beta:/app/data
 #      - ./configs/knowledge:/app/knowledge:ro
+#      - ./configs/agents.yaml:/app/agents.yaml:ro
+#      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
 #
 #  gamma:
 #    build: .
@@ -53,6 +60,8 @@ services:
 #    volumes:
 #      - ./data/gamma:/app/data
 #      - ./configs/knowledge:/app/knowledge:ro
+#      - ./configs/agents.yaml:/app/agents.yaml:ro
+#      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
 #
 #  delta:
 #    build: .
@@ -68,3 +77,5 @@ services:
 #    volumes:
 #      - ./data/delta:/app/data
 #      - ./configs/knowledge:/app/knowledge:ro
+#      - ./configs/agents.yaml:/app/agents.yaml:ro
+#      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro

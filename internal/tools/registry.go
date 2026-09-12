@@ -1,7 +1,15 @@
 package tools
 
+import "sync"
+
 // registry maps services-friendly string keys to tool factory functions.
 // CoreTools are not included here — they are always added unconditionally.
+//
+// registryMu guards registry and registryDescriptions: the maps are mutated at
+// startup (init-time Register calls, RegisterMCPServers) and again whenever
+// mcp_servers.yaml is hot-reloaded, while LookupTools reads them from the
+// tool-reload path.
+var registryMu sync.RWMutex
 
 type toolFactory func() []ToolDefinition
 
@@ -32,11 +40,30 @@ var registry = map[string]toolFactory{
 
 // LookupTools returns the scripts for a given services key.
 func LookupTools(key string) ([]ToolDefinition, bool) {
+	registryMu.RLock()
 	factory, ok := registry[key]
+	registryMu.RUnlock()
 	if !ok {
 		return nil, false
 	}
 	return factory(), true
+}
+
+// HasTool reports whether key is registered, without invoking its factory.
+func HasTool(key string) bool {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	_, ok := registry[key]
+	return ok
+}
+
+// Unregister removes a tool factory (and its description) from the registry.
+// Used when a remote MCP server is dropped from mcp_servers.yaml at runtime.
+func Unregister(key string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	delete(registry, key)
+	delete(registryDescriptions, key)
 }
 
 // Register adds a tool factory to the registry under the given key. Intended
@@ -50,6 +77,8 @@ func Register(key string, factory func() []ToolDefinition, description string) {
 	if key == "" || factory == nil {
 		return
 	}
+	registryMu.Lock()
+	defer registryMu.Unlock()
 	registry[key] = factory
 	if description != "" {
 		registryDescriptions[key] = description

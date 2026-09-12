@@ -17,6 +17,8 @@
     <a href="/agents/new" class="{{if eq .Active "new"}}active{{end}}">Add Agent</a>
     <a href="/agents/list" class="{{if eq .Active "list"}}active{{end}}">Existing Agents</a>
     <a href="/agents/external" class="{{if or (eq .Active "external") (eq .Active "external-new")}}active{{end}}">External Partners</a>
+    <div class="nav-group">Tools</div>
+    <a href="/mcp" class="{{if or (eq .Active "mcp") (eq .Active "mcp-new")}}active{{end}}">MCP Servers</a>
     <div class="nav-group">Email</div>
     <a href="/email-service" class="{{if eq .Active "email"}}active{{end}}">Email Service</a>
   </nav>

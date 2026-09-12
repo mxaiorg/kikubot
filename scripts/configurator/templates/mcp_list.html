@@ -1,0 +1,58 @@
+{{define "mcp_list"}}{{template "layout" .}}{{end}}
+{{define "page"}}
+<header class="page-header">
+  <h1>MCP Servers</h1>
+  <p class="lead">Remote (Streamable HTTP) MCP servers, declared in <code>configs/mcp_servers.yaml</code>. Each row becomes a tool key you can assign to an agent under <em>Tools</em>; credentials are referenced by env-var name and stored in <code>configs/secrets.env</code>. Running agents hot-reload this catalog — no rebuild or restart.</p>
+</header>
+<div class="card">
+  {{if .Data}}
+  <div class="table-scroll">
+  <table class="table">
+    <thead><tr><th>Key</th><th>URL</th><th>Auth</th><th>Status</th><th>Used by</th><th></th></tr></thead>
+    <tbody>
+    {{range .Data}}
+      <tr>
+        <td><code>{{.Key}}</code>{{if .Description}}<div class="hint">{{.Description}}</div>{{end}}</td>
+        <td><code>{{.URL}}</code></td>
+        <td>{{.Auth}}{{if .Header}}<div class="hint"><code>{{.Header}}</code></div>{{end}}</td>
+        <td>
+          {{if .MissingEnv}}
+            <span class="badge warn" title="These secrets.env variables are empty or missing, so the tool is unavailable at runtime.">⚠️ secrets missing</span>
+            <div class="hint">{{range $i, $n := .MissingEnv}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}</div>
+          {{else if .EnvNames}}
+            <span class="badge ok" title="{{join .EnvNames ", "}} set in secrets.env">✓ credentials</span>
+          {{else}}
+            <span class="badge ok">✓ no auth</span>
+          {{end}}
+          {{if .TokenMissing}}
+            <div><span class="badge warn" title="OAuth2 servers need a hand-seeded token file at data/&lt;agent&gt;/oauth/{{.Key}}.json. Missing for: {{join .TokenMissing ", "}}">⚠️ token file missing ({{len .TokenMissing}})</span></div>
+          {{end}}
+        </td>
+        <td>
+          {{if .UsedBy}}
+            {{range $i, $a := .UsedBy}}{{if $i}}, {{end}}<a href="/agents/edit?email={{$a.Email}}">{{$a.Name}}</a>{{end}}
+          {{else}}
+            <span class="hint">— no agent yet</span>
+          {{end}}
+        </td>
+        <td>
+          <a class="primary" href="/mcp/edit?key={{.Key}}">Edit</a>
+          <form method="post" action="/mcp/delete" class="inline" onsubmit="return confirm('Remove MCP server {{.Key}}?{{if .UsedBy}} It will also be removed from the tools of: {{join (agentNames .UsedBy) ", "}}.{{end}}');">
+            <input type="hidden" name="key" value="{{.Key}}">
+            <button type="submit" class="ghost danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}
+    <p class="empty">No remote MCP servers configured. <a href="/mcp/new">Add one</a>.</p>
+  {{end}}
+</div>
+<div class="actions">
+  <a class="primary" href="/mcp/new">Add MCP Server</a>
+</div>
+<p class="hint">Local stdio MCP bridges (<code>salesforce_mcp</code>, <code>box_cli</code>, <code>xero_mcp</code>) are built-in tool keys from <code>internal/tools/registry.go</code> and are not managed here — assign them directly on the agent form.</p>
+{{end}}

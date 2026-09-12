@@ -210,8 +210,114 @@ func (s *server) handleAgentSave(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, "agent_form", pageData{Active: "new", Data: a, Flash: err.Error(), FlashKind: "error"})
 		return
 	}
-	setFlash(w, "success", "Saved agent "+a.Name)
+	msg := "Saved agent " + a.Name
+	// Tool assignments hot-reload into a running container; everything else on
+	// this form (model, prompt, ACL, password) is read at startup. Only signal
+	// an existing agent whose address didn't change — a new or renamed agent
+	// has no running service under that name yet.
+	if a.OriginalEmail != "" && strings.EqualFold(a.OriginalEmail, a.Email) {
+		msg += reloadNote(s.root, []string{a.Email}, "tools") + "; other settings apply on restart"
+	}
+	setFlash(w, "success", msg)
 	http.Redirect(w, r, "/agents/list", http.StatusSeeOther)
+}
+
+// ---- MCP servers ----
+
+func (s *server) handleMCPList(w http.ResponseWriter, r *http.Request) {
+	rows, err := listMCPServers(s.root)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "mcp_list", pageData{Active: "mcp", Data: rows})
+}
+
+func (s *server) handleMCPNew(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "mcp_form", pageData{Active: "mcp-new", Data: newMCPForm()})
+}
+
+func (s *server) handleMCPEdit(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		http.Redirect(w, r, "/mcp", http.StatusSeeOther)
+		return
+	}
+	f, err := loadMCPForm(s.root, key)
+	if err != nil {
+		setFlash(w, "error", "Load failed: "+err.Error())
+		http.Redirect(w, r, "/mcp", http.StatusSeeOther)
+		return
+	}
+	s.render(w, r, "mcp_form", pageData{Active: "mcp", Data: f})
+}
+
+func (s *server) handleMCPSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/mcp", http.StatusSeeOther)
+		return
+	}
+	_ = r.ParseForm()
+	f := &mcpForm{
+		OriginalKey:       strings.TrimSpace(r.FormValue("original_key")),
+		Key:               r.FormValue("key"),
+		URL:               r.FormValue("url"),
+		Auth:              r.FormValue("auth"),
+		Description:       r.FormValue("description"),
+		Header:            r.FormValue("header"),
+		Scheme:            r.FormValue("scheme"),
+		TokenEnv:          r.FormValue("token_env"),
+		ClientIDEnv:       r.FormValue("client_id_env"),
+		ClientSecretEnv:   r.FormValue("client_secret_env"),
+		MetadataURL:       r.FormValue("metadata_url"),
+		TokenValue:        r.FormValue("token_value"),
+		ClientIDValue:     r.FormValue("client_id_value"),
+		ClientSecretValue: r.FormValue("client_secret_value"),
+	}
+	users, err := f.save(s.root)
+	if err != nil {
+		// Re-render with the attempted values so the operator can fix and retry.
+		if rr, rerr := loadRoster(s.root); rerr == nil && f.OriginalKey != "" {
+			f.UsedBy = agentsUsingKey(rr, f.OriginalKey)
+		}
+		s.render(w, r, "mcp_form", pageData{Active: "mcp", Data: f, Flash: "Save failed: " + err.Error(), FlashKind: "error"})
+		return
+	}
+	msg := "Saved MCP server " + f.Key
+	if f.OriginalKey != "" && f.OriginalKey != f.Key {
+		msg += " (renamed from " + f.OriginalKey + "; agents' tool lists updated"
+		if normalizeMCPAuth(f.Auth) == "oauth2" {
+			msg += " — rename any seeded data/<agent>/oauth/" + f.OriginalKey + ".json token files too"
+		}
+		msg += ")"
+	}
+	if len(users) > 0 {
+		msg += reloadNote(s.root, agentEmails(users), "MCP catalog")
+	}
+	setFlash(w, "success", msg)
+	http.Redirect(w, r, "/mcp", http.StatusSeeOther)
+}
+
+func (s *server) handleMCPDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/mcp", http.StatusSeeOther)
+		return
+	}
+	_ = r.ParseForm()
+	key := strings.TrimSpace(r.FormValue("key"))
+	users, err := deleteMCPServer(s.root, key)
+	if err != nil {
+		setFlash(w, "error", "Delete failed: "+err.Error())
+		http.Redirect(w, r, "/mcp", http.StatusSeeOther)
+		return
+	}
+	msg := "Deleted MCP server " + key
+	if len(users) > 0 {
+		msg += " and removed it from the tools of " + strings.Join(agentNames(users), ", ")
+		msg += reloadNote(s.root, agentEmails(users), "MCP catalog")
+	}
+	setFlash(w, "success", msg)
+	http.Redirect(w, r, "/mcp", http.StatusSeeOther)
 }
 
 // ---- List Agents ----
@@ -591,6 +697,7 @@ var templateFuncs = template.FuncMap{
 	"privateToolsAttr": privateToolsAttr,
 	"mcpToolsAttr":     mcpToolsAttr,
 	"infoIcon":         infoIcon,
+	"agentNames":       agentNames,
 	"add":              func(a, b int) int { return a + b },
 }
 

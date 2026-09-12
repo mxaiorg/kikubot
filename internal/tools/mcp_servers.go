@@ -5,17 +5,33 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"kikubot/internal/config"
 
 	"github.com/mark3labs/mcp-go/client/transport"
 )
 
-// RegisterMCPServers turns the declarative `mcp_servers:` table from agents.yaml
-// into registry entries — one tool key per server — so adding a remote MCP
-// (static-bearer or OAuth2) is config-only, with no new Go. Call once at
-// startup, after config.Apply and InitOAuthDir, and before initAgent so the
+// mcpRegistered tracks the registry keys that came from the mcp_servers table,
+// so a later RegisterMCPServers (hot reload) can drop the ones that no longer
+// exist. Guarded by mcpRegisteredMu; the registry maps themselves have their
+// own lock.
+var (
+	mcpRegisteredMu sync.Mutex
+	mcpRegistered   = map[string]bool{}
+)
+
+// RegisterMCPServers turns the declarative `mcp_servers:` table from
+// mcp_servers.yaml into registry entries — one tool key per server — so adding
+// a remote MCP (static-bearer or OAuth2) is config-only, with no new Go. Call
+// at startup, after config.Apply and InitOAuthDir, and before initAgent so the
 // keys are resolvable when an agent's tools are assembled.
+//
+// The call has replace semantics: keys registered by a previous call that are
+// absent from (or invalid in) the new table are unregistered, so the registry
+// always mirrors the current file. That is what lets a running agent pick up
+// mcp_servers.yaml edits on hot reload. Local/static registry keys are never
+// touched — a table row cannot shadow a built-in tool key.
 //
 // A misconfigured entry (unknown auth type, missing required env names) is
 // logged and skipped rather than fatal, so one broken row can't take the agent
@@ -23,10 +39,18 @@ import (
 // fine but yields no tools (also logged) — same graceful-degradation contract
 // as the hand-written MCP factories.
 func RegisterMCPServers(servers []config.MCPServer) {
+	mcpRegisteredMu.Lock()
+	defer mcpRegisteredMu.Unlock()
+
+	next := make(map[string]bool, len(servers))
 	for _, srv := range servers {
 		key := strings.TrimSpace(srv.Key)
 		if key == "" || strings.TrimSpace(srv.URL) == "" {
 			log.Printf("[mcp] skipping mcp_servers entry with empty key/url: %+v", srv)
+			continue
+		}
+		if HasTool(key) && !mcpRegistered[key] {
+			log.Printf("[mcp] %s: key collides with a built-in tool — row ignored", key)
 			continue
 		}
 		factory, err := mcpServerFactory(srv)
@@ -35,7 +59,15 @@ func RegisterMCPServers(servers []config.MCPServer) {
 			continue
 		}
 		Register(key, factory, strings.TrimSpace(srv.Description))
+		next[key] = true
 	}
+	for key := range mcpRegistered {
+		if !next[key] {
+			Unregister(key)
+			log.Printf("[mcp] %s: removed from mcp_servers.yaml — tool unregistered", key)
+		}
+	}
+	mcpRegistered = next
 }
 
 // mcpServerFactory builds the registry factory for one server entry. The auth

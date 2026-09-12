@@ -178,6 +178,11 @@ func Load(path string) (*AgentsConfig, error) {
 // when the file does not exist — a deployment may simply declare no remote MCP
 // servers, which is not an error.
 func LoadMCPServers(path string) ([]MCPServer, error) {
+	// A bind-mounted file whose host side was missing shows up as an empty
+	// directory inside the container; treat that like "no file" too.
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return nil, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

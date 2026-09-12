@@ -47,6 +47,31 @@ var (
 	knowledgeReloadMu sync.Mutex
 )
 
+// Tool hot-reload state. The agent's tool set is assembled from this agent's
+// `tools:` list in agents.yaml plus the remote-MCP catalog in mcp_servers.yaml.
+// reloadToolsIfChanged re-assembles it when either file's mtime moves (and
+// forceReloadTools does so on SIGHUP), so the configurator can assign a tool
+// or edit an MCP server without a rebuild or restart.
+//
+// toolCache remembers the ToolDefinitions produced per registry key, together
+// with a signature of the config that produced them. Re-assembly reuses cached
+// entries whose signature is unchanged and only re-runs factories for new or
+// edited keys — important because local stdio MCP bridges (salesforce_mcp,
+// box_cli, …) spawn a long-lived subprocess per factory call, and a remote
+// bridge does a tools/list round-trip.
+var (
+	toolsReloadMu    sync.Mutex
+	agentsCfgModTime time.Time
+	mcpCfgModTime    time.Time
+	coreToolsCache   []tools.ToolDefinition
+	toolCache        = map[string]cachedTools{}
+)
+
+type cachedTools struct {
+	sig  string
+	defs []tools.ToolDefinition
+}
+
 // emailRetryCounts tracks how many times each inbound Message-Id has been
 // left unseen for retry. Process-local — survives across poll ticks but
 // resets on container restart, which is intentional: a restart implies the
@@ -156,6 +181,7 @@ func main() {
 	go func() {
 		for range hup {
 			forceReloadKnowledge()
+			forceReloadTools()
 		}
 	}()
 
@@ -183,6 +209,9 @@ func main() {
 func process(parent context.Context) {
 	// Pick up any knowledge-base edits since the last poll (no restart needed).
 	reloadKnowledgeIfChanged()
+	// Likewise tool assignments (agents.yaml) and the remote MCP catalog
+	// (mcp_servers.yaml).
+	reloadToolsIfChanged()
 
 	// Check the email inbox for new messages
 	//log.Println("checking email inbox...")
@@ -840,31 +869,15 @@ func handleAutoReply(ctx context.Context, email services.Email) {
 }
 
 func initAgent() {
-	// Setup agentTools
-	agentTools := tools.CoreTools()
-
 	cfg := agentsCfg
-	if cfg != nil {
-		if agentDef := cfg.FindAgent(config.AgentEmail); agentDef != nil {
-			for _, key := range agentDef.Tools {
-				t, ok := tools.LookupTools(key)
-				if !ok {
-					log.Printf("warning: unknown tool key %q for %s", key, config.AgentEmail)
-					continue
-				}
-				agentTools = append(agentTools, t...)
-			}
-		}
-	}
 
-	// Deduplicate scripts by name
-	agentTools = dedupTools(agentTools)
-	if disabled := disabledToolNames(cfg, config.AgentEmail); len(disabled) > 0 {
-		agentTools = filterDisabledTools(agentTools, disabled)
-	}
-	//for _, tool := range agentTools {
-	//	log.Println("loaded tool:", tool.Name)
-	//}
+	// Setup agentTools. Record the config mtimes under the reload lock so the
+	// first poll doesn't immediately re-assemble what we just built.
+	toolsReloadMu.Lock()
+	mcpServers, _ := config.LoadMCPServers(mcpServersConfigPath())
+	agentTools := buildAgentTools(cfg, mcpServers)
+	agentsCfgModTime, mcpCfgModTime = configModTimes()
+	toolsReloadMu.Unlock()
 
 	var coworkerClause string
 	if cfg != nil {
@@ -916,6 +929,130 @@ func initAgent() {
 
 	log.Printf("Agent %s initialized with %d scripts", config.AgentName, len(agentTools))
 	//log.Printf("Agent initialized with system prompt:\n\n%s\n\n", system)
+}
+
+// buildAgentTools assembles this agent's tool set: core tools plus every key in
+// its `tools:` list, deduplicated by name and filtered by disabled_tools.
+// Results are memoised per key in toolCache (see its doc); mcpServers supplies
+// the signature for remote-MCP keys so an edited row invalidates its entry.
+// Caller must hold toolsReloadMu.
+func buildAgentTools(cfg *config.AgentsConfig, mcpServers []config.MCPServer) []tools.ToolDefinition {
+	if coreToolsCache == nil {
+		coreToolsCache = tools.CoreTools()
+	}
+	agentTools := append([]tools.ToolDefinition(nil), coreToolsCache...)
+
+	mcpSig := make(map[string]string, len(mcpServers))
+	for _, srv := range mcpServers {
+		mcpSig[strings.TrimSpace(srv.Key)] = fmt.Sprintf("%+v", srv)
+	}
+
+	wanted := map[string]bool{}
+	if cfg != nil {
+		if agentDef := cfg.FindAgent(config.AgentEmail); agentDef != nil {
+			for _, key := range agentDef.Tools {
+				key = strings.TrimSpace(key)
+				if key == "" {
+					continue
+				}
+				wanted[key] = true
+				sig := mcpSig[key] // "" for local/static registry keys
+				if c, ok := toolCache[key]; ok && c.sig == sig {
+					agentTools = append(agentTools, c.defs...)
+					continue
+				}
+				t, ok := tools.LookupTools(key)
+				if !ok {
+					log.Printf("warning: unknown tool key %q for %s", key, config.AgentEmail)
+					delete(toolCache, key)
+					continue
+				}
+				toolCache[key] = cachedTools{sig: sig, defs: t}
+				agentTools = append(agentTools, t...)
+			}
+		}
+	}
+	// Forget keys this agent no longer lists, so a later re-add rebuilds them
+	// fresh (a remote MCP may have changed meanwhile). Local stdio MCP
+	// subprocesses behind a dropped key are not reaped — same as before.
+	for key := range toolCache {
+		if !wanted[key] {
+			delete(toolCache, key)
+		}
+	}
+
+	// Deduplicate scripts by name
+	agentTools = dedupTools(agentTools)
+	if disabled := disabledToolNames(cfg, config.AgentEmail); len(disabled) > 0 {
+		agentTools = filterDisabledTools(agentTools, disabled)
+	}
+	return agentTools
+}
+
+// configModTimes returns the mtimes of agents.yaml and mcp_servers.yaml (zero
+// when a file is missing).
+func configModTimes() (agentsMT, mcpMT time.Time) {
+	if info, err := os.Stat(agentsConfigPath()); err == nil {
+		agentsMT = info.ModTime()
+	}
+	if info, err := os.Stat(mcpServersConfigPath()); err == nil {
+		mcpMT = info.ModTime()
+	}
+	return
+}
+
+// reloadToolsIfChanged re-assembles the agent's tool set when agents.yaml or
+// mcp_servers.yaml changed since the last load. Cheap to call every poll: two
+// stats unless something moved.
+func reloadToolsIfChanged() {
+	toolsReloadMu.Lock()
+	defer toolsReloadMu.Unlock()
+	agentsMT, mcpMT := configModTimes()
+	if !agentsMT.After(agentsCfgModTime) && !mcpMT.After(mcpCfgModTime) {
+		return
+	}
+	reloadTools("config change")
+}
+
+// forceReloadTools unconditionally re-assembles the tool set. Wired to SIGHUP
+// alongside the knowledge reload so the configurator can propagate a tool
+// assignment or MCP catalog edit immediately.
+func forceReloadTools() {
+	toolsReloadMu.Lock()
+	defer toolsReloadMu.Unlock()
+	reloadTools("SIGHUP")
+}
+
+// reloadTools re-reads agents.yaml (for this agent's tools/disabled_tools) and
+// mcp_servers.yaml (re-registering the remote MCP catalog with replace
+// semantics), rebuilds the tool set through the cache, and swaps it into the
+// agent. Only the tool set is refreshed — model, prompt, ACL and budget
+// overrides in agents.yaml still need a restart. On a parse error the current
+// tool set is kept. Caller must hold toolsReloadMu.
+func reloadTools(reason string) {
+	// Always advance the recorded mtimes so a broken file is logged once per
+	// change rather than every poll; SIGHUP retries on demand.
+	agentsCfgModTime, mcpCfgModTime = configModTimes()
+	if agent == nil {
+		return
+	}
+	cfg, err := config.Load(agentsConfigPath())
+	if err != nil {
+		log.Printf("tool reload (%s) skipped: %v", reason, err)
+		return
+	}
+	if cfg == nil {
+		cfg = agentsCfg
+	}
+	mcpServers, err := config.LoadMCPServers(mcpServersConfigPath())
+	if err != nil {
+		log.Printf("tool reload (%s) skipped: %v", reason, err)
+		return
+	}
+	tools.RegisterMCPServers(mcpServers)
+	agentTools := buildAgentTools(cfg, mcpServers)
+	agent.SetTools(agentTools)
+	log.Printf("tools reloaded on %s: %d tools", reason, len(agentTools))
 }
 
 func dedupTools(toolList []tools.ToolDefinition) []tools.ToolDefinition {

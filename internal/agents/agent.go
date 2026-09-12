@@ -39,6 +39,11 @@ type Agent struct {
 	// the knowledge base is edited) while HandleMessage reads it to build the
 	// cacheable stable prompt.
 	sysMu sync.RWMutex
+	// toolsMu guards tools/toolIndex, which SetTools hot-swaps at runtime (when
+	// agents.yaml or mcp_servers.yaml change). A turn snapshots the tool set
+	// once at its start (see toolSet) so a swap mid-turn can't desynchronise
+	// the definitions sent to the model from the index used to dispatch calls.
+	toolsMu sync.RWMutex
 }
 
 func NewAgent(cfg AgentConfig, agentTools []tools.ToolDefinition) *Agent {
@@ -55,8 +60,45 @@ func NewAgent(cfg AgentConfig, agentTools []tools.ToolDefinition) *Agent {
 }
 
 func (a *Agent) RegisterTool(td tools.ToolDefinition) {
+	a.toolsMu.Lock()
+	defer a.toolsMu.Unlock()
 	a.tools = append(a.tools, td)
 	a.toolIndex[td.Name] = td
+}
+
+// SetTools replaces the agent's tool set. It exists so tool-assignment edits
+// (an agent's `tools:` list in agents.yaml) and remote MCP catalog edits
+// (mcp_servers.yaml) can be hot-reloaded without recreating the agent. The
+// next HandleMessage picks up the new set; a turn already in flight keeps the
+// snapshot it started with.
+func (a *Agent) SetTools(defs []tools.ToolDefinition) {
+	a.toolsMu.Lock()
+	defer a.toolsMu.Unlock()
+	a.tools = defs
+	a.toolIndex = indexTools(defs)
+}
+
+// Tools returns a copy of the current tool set.
+func (a *Agent) Tools() []tools.ToolDefinition {
+	a.toolsMu.RLock()
+	defer a.toolsMu.RUnlock()
+	return append([]tools.ToolDefinition(nil), a.tools...)
+}
+
+// toolSet snapshots the current tools and their name index under the read
+// lock, for use by one turn.
+func (a *Agent) toolSet() ([]tools.ToolDefinition, map[string]tools.ToolDefinition) {
+	a.toolsMu.RLock()
+	defer a.toolsMu.RUnlock()
+	return a.tools, a.toolIndex
+}
+
+func indexTools(defs []tools.ToolDefinition) map[string]tools.ToolDefinition {
+	idx := make(map[string]tools.ToolDefinition, len(defs))
+	for _, t := range defs {
+		idx[t.Name] = t
+	}
+	return idx
 }
 
 func (a *Agent) SetHistory(history []anthropic.MessageParam) {
@@ -93,6 +135,15 @@ func (a *Agent) systemPrompt() string {
 // HandleMessage runs the agent's agentic loop for one inbound message.
 // It returns any outbound messages produced by send_message tool calls.
 func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *services.Email, maxTurns int) error {
+	toolSet, toolIndex := a.toolSet()
+	return a.handleMessageWith(ctx, preSys, email, maxTurns, toolSet, toolIndex)
+}
+
+// handleMessageWith is HandleMessage over an explicit tool snapshot. The
+// snapshot is fixed for the whole turn: the definitions advertised to the model
+// and the index used to dispatch its tool calls always agree, even if SetTools
+// swaps the live set meanwhile.
+func (a *Agent) handleMessageWith(ctx context.Context, preSys string, email *services.Email, maxTurns int, toolSet []tools.ToolDefinition, toolIndex map[string]tools.ToolDefinition) error {
 	// Append the incoming message to conversation history
 	msg, msgErr := email.UserMessage()
 	if msgErr != nil {
@@ -106,7 +157,7 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 	// volatile, not cached.
 	var staticToolInstructions []string
 	var dynamicToolInstructions []string
-	for _, toolItem := range a.tools {
+	for _, toolItem := range toolSet {
 		if toolItem.StaticSystem != "" {
 			staticToolInstructions = append(staticToolInstructions, toolItem.StaticSystem)
 		}
@@ -154,7 +205,7 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 	}
 
 	// Build provider-specific tool params from our tool definitions
-	toolDefs := toToolDefs(a.tools)
+	toolDefs := toToolDefs(toolSet)
 	sdkTools, serverToolNames := a.provider.BuildTools(toolDefs, config.LlmModel)
 	serverToolSet := make(map[string]bool, len(serverToolNames))
 	for _, name := range serverToolNames {
@@ -251,7 +302,7 @@ func (a *Agent) HandleMessage(ctx context.Context, preSys string, email *service
 					continue
 				}
 
-				td, ok := a.toolIndex[block.Name]
+				td, ok := toolIndex[block.Name]
 				if !ok {
 					toolResults = append(toolResults, a.provider.NewToolResult(
 						block.ID, fmt.Sprintf("unknown tool: %s", block.Name), true,
@@ -365,15 +416,16 @@ func (a *Agent) HandleSnooze(ctx context.Context, snooze services.Snooze, maxTur
 		preSys += "\n\nTask: " + snooze.Description
 	}
 
-	// Temporarily remove snooze scripts from the agent's tool set. Restore on
-	// every exit path — an error return must not leave them stripped.
-	originalTools := a.tools
-	a.tools = tools.WithoutTool(tools.WithoutTool(a.tools, "snooze_tool"), "unsnooze_tool")
-	defer func() { a.tools = originalTools }()
+	// Run this turn without the snooze tools so the model can't re-snooze
+	// itself. The reduced set is a per-turn snapshot — the live tool set is
+	// never touched, so there is nothing to restore on any exit path (error
+	// or not) and a concurrent SetTools can't be clobbered by a restore.
+	current, _ := a.toolSet()
+	reduced := tools.WithoutTool(tools.WithoutTool(current, "snooze_tool"), "unsnooze_tool")
 
 	replay := emails[0]
 	replay.Content = snoozeReplayContent(snooze, replay, time.Now())
-	handleErr := a.HandleMessage(ctx, preSys, &replay, maxTurns)
+	handleErr := a.handleMessageWith(ctx, preSys, &replay, maxTurns, reduced, indexTools(reduced))
 	if handleErr != nil {
 		log.Printf("error handling message: %s", handleErr)
 		return handleErr

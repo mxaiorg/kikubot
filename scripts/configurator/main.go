@@ -1,6 +1,6 @@
 // Configurator is an HTMX-based dashboard for editing kikubot's configuration
-// files (configs/agents.yaml, configs/secrets.env, and the bundled
-// docker-mailserver postfix maps under services/dms/config/).
+// files (configs/agents.yaml, configs/mcp_servers.yaml, configs/secrets.env,
+// and the bundled docker-mailserver postfix maps under services/dms/config/).
 //
 // Run from the kikubot project root:
 //
@@ -83,6 +83,11 @@ func main() {
 	mux.HandleFunc("/email-service", s.handleEmailService)
 	mux.HandleFunc("/email-service/cert", s.handleEmailServiceCert)
 	mux.HandleFunc("/knowledge", s.handleKnowledge)
+	mux.HandleFunc("/mcp", s.handleMCPList)
+	mux.HandleFunc("/mcp/new", s.handleMCPNew)
+	mux.HandleFunc("/mcp/edit", s.handleMCPEdit)
+	mux.HandleFunc("/mcp/save", s.handleMCPSave)
+	mux.HandleFunc("/mcp/delete", s.handleMCPDelete)
 	mux.HandleFunc("/knowledge/save", s.handleKnowledgeSave)
 	mux.HandleFunc("/knowledge/delete", s.handleKnowledgeDelete)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
@@ -129,6 +134,8 @@ func buildTemplates() (map[string]*template.Template, error) {
 		"agents_list":   {"templates/layout.html", "templates/agents_list.html"},
 		"external_list": {"templates/layout.html", "templates/external_list.html"},
 		"external_form": {"templates/layout.html", "templates/external_form.html"},
+		"mcp_list":      {"templates/layout.html", "templates/mcp_list.html"},
+		"mcp_form":      {"templates/layout.html", "templates/mcp_form.html"},
 		"email_service": {"templates/layout.html", "templates/email_service.html"},
 		// Standalone partial for HTMX save/delete responses.
 		"knowledge_editor": {"templates/knowledge.html"},
