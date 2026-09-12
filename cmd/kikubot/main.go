@@ -218,19 +218,56 @@ func process(parent context.Context) {
 			continue
 		}
 		log.Println("snooze:", snooze.MessageId)
-		timeout := time.Duration(config.AgentTimeout) * time.Second
-		ctx, cancel := context.WithTimeout(parent, timeout)
-		snoozeErr := agent.HandleSnooze(ctx, *snooze, config.MaxTurns)
-		cancel()
-		if snoozeErr != nil {
+		snoozeErr := runSnooze(parent, snooze)
+		if snoozeErr != nil && !errors.Is(snoozeErr, agents.ErrMaxTurns) {
 			log.Println("error handling snooze:", snoozeErr)
 			break // stop processing snoozes this cycle; retry next poll
 		}
-		// Only advance/delete after successful execution
+		if snoozeErr != nil {
+			// Max-turns is not retryable — re-firing every poll would burn a
+			// fresh budget each time. Advance to the next tick instead.
+			log.Println("snooze hit max turns; advancing instead of retrying:", snooze.MessageId)
+		}
+		// Only advance/delete after execution (or a non-retryable failure)
 		if advErr := services.AdvanceOrDeleteSnooze(parent, snooze); advErr != nil {
 			log.Println("error advancing snooze:", advErr)
 		}
 	}
+}
+
+// runSnooze replays a fired scheduled task against its own thread. The agent's
+// in-process history is whatever the last handled email left behind, so the
+// thread's saved memory is loaded first and the run is persisted afterward.
+// Without this the replay ran on stale (or another thread's) history, and a
+// run that delegates and parks as waiting resumed from memory that never
+// recorded the run.
+func runSnooze(parent context.Context, snooze *services.Snooze) error {
+	threadId := snooze.ThreadId
+	if threadId == "" {
+		root, rootErr := services.GetThreadRootId(parent, snooze.MessageId)
+		if rootErr != nil {
+			return fmt.Errorf("resolving thread root for %s: %w", snooze.MessageId, rootErr)
+		}
+		threadId = root
+	}
+	mem, memErr := services.GetMemory(threadId)
+	if memErr != nil && !errors.Is(memErr, services.ErrMemoryNotFound) {
+		return fmt.Errorf("reading memory for %s: %w", threadId, memErr)
+	}
+	agent.ClearHistory()
+	if mem != nil {
+		agent.SetHistory(mem.History)
+	}
+
+	timeout := time.Duration(config.AgentTimeout) * time.Second
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	hErr := agent.HandleSnooze(ctx, *snooze, config.MaxTurns)
+	cancel()
+	// Always save history — even on error (mirrors the inbound-email path).
+	if sErr := services.SaveMemoryHistory(parent, agents.StripAttachmentBlobs(agent.History()), snooze.MessageId); sErr != nil {
+		log.Printf("snooze: error saving history for %s: %s", threadId, sErr)
+	}
+	return hErr
 }
 
 // waitingWatchdogMaxFires bounds how many times a stuck-task watchdog will
@@ -295,6 +332,7 @@ func runWatchdog(parent context.Context, snooze *services.Snooze) {
 	agent.SetHistory(mem.History)
 	nudge := services.Snooze{
 		MessageId: snooze.MessageId,
+		Watchdog:  true, // frames the replay as a follow-up, not a scheduled run
 		Description: "You previously set this task to 'waiting' and are still waiting on a coworker who " +
 			"has not replied. Do NOT simply wait again. Either (a) send a brief follow-up to the coworker " +
 			"you delegated to, or (b) if you already have enough to proceed, reply to the original requester " +

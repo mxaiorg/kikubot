@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
@@ -364,17 +365,55 @@ func (a *Agent) HandleSnooze(ctx context.Context, snooze services.Snooze, maxTur
 		preSys += "\n\nTask: " + snooze.Description
 	}
 
-	// Temporarily remove snooze scripts from the agent's tool set
+	// Temporarily remove snooze scripts from the agent's tool set. Restore on
+	// every exit path — an error return must not leave them stripped.
 	originalTools := a.tools
 	a.tools = tools.WithoutTool(tools.WithoutTool(a.tools, "snooze_tool"), "unsnooze_tool")
-	handleErr := a.HandleMessage(ctx, preSys, &emails[0], maxTurns)
+	defer func() { a.tools = originalTools }()
+
+	replay := emails[0]
+	replay.Content = snoozeReplayContent(snooze, replay, time.Now())
+	handleErr := a.HandleMessage(ctx, preSys, &replay, maxTurns)
 	if handleErr != nil {
 		log.Printf("error handling message: %s", handleErr)
 		return handleErr
 	}
-	// Restore original scripts
-	a.tools = originalTools
 	return nil
+}
+
+// snoozeReplayContent frames a replayed email in the user turn itself so the
+// model can't mistake it for a fresh message. The replayed email is usually the
+// one that *created* the schedule ("set up a daily run at 6am") and the thread
+// history already shows it handled — with only the system-prompt note, the
+// model read the replay as a duplicate request and answered "already set up"
+// instead of running the task.
+func snoozeReplayContent(snooze services.Snooze, email services.Email, now time.Time) string {
+	if snooze.Timezone != "" {
+		if loc, err := services.LoadTimezone(snooze.Timezone); err == nil {
+			now = now.In(loc)
+		}
+	}
+	var b strings.Builder
+	if snooze.Watchdog {
+		b.WriteString("[AUTOMATED FOLLOW-UP — not a new email from the sender]\n")
+		fmt.Fprintf(&b, "Current time: %s\n", now.Format("Mon, 02 Jan 2006 15:04 -0700"))
+		fmt.Fprintf(&b, "Instruction: %s\n", snooze.Description)
+		b.WriteString("The email below is replayed for context only.\n")
+	} else {
+		b.WriteString("[AUTOMATED SCHEDULED RUN — not a new email from the sender]\n")
+		fmt.Fprintf(&b, "Current time: %s\n", now.Format("Mon, 02 Jan 2006 15:04 -0700"))
+		if snooze.Description != "" {
+			fmt.Fprintf(&b, "Task to perform now: %s\n", snooze.Description)
+		}
+		fmt.Fprintf(&b, "The email below (originally received %s) is being replayed because its scheduled time "+
+			"has arrived. If it asks for something to be scheduled or set up, that was already done — the schedule "+
+			"is what triggered this run. Do not reply about the schedule and do not treat this as a duplicate of an "+
+			"earlier message: carry out the task itself now, from the start, as if the sender had just asked for it.\n",
+			email.Date.Format("Mon, 02 Jan 2006 15:04 -0700"))
+	}
+	b.WriteString("\n--- Replayed email ---\n")
+	b.WriteString(email.Content)
+	return b.String()
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
