@@ -1,0 +1,8 @@
+# Build context for scripts/configurator/Dockerfile only (BuildKit picks up
+# <Dockerfile>.dockerignore). Allowlist what the Go build needs so data/,
+# maildata and secrets never get sent to the builder.
+*
+!go.mod
+!go.sum
+!internal/
+!scripts/configurator/

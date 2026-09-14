@@ -1,0 +1,39 @@
+# Kikubot Agent Configurator — the configuration dashboard, run in Docker
+# instead of `go run ./scripts/configurator`.
+#
+#   docker compose -f docker-compose-configurator.yml up -d --build
+#   open http://127.0.0.1:50042
+#
+# The dashboard has no authentication and can read/write configs/secrets.env,
+# and the docker.sock mount below is root-equivalent on the host. The port is
+# therefore published on loopback only — reach it remotely through an SSH
+# tunnel (ssh -L 50042:127.0.0.1:50042 <host>), never by widening the bind.
+
+# Own project name, so the agents' `docker compose up` (project = this
+# directory's name) doesn't treat the configurator as an orphan container.
+name: kikubot-configurator
+
+services:
+  configurator:
+    build:
+      context: .
+      dockerfile: scripts/configurator/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CONFIGURATOR_PORT:-50042}:50042"
+    environment:
+      # After a save the configurator SIGHUPs the affected agents with
+      # `docker compose -f /kikubot/docker-compose.yml kill -s HUP …`. Compose
+      # would derive the project name from the mount point, so pin it to the
+      # agents' project: the name of the directory you run them from. Override
+      # with KIKUBOT_COMPOSE_PROJECT=<dir-name> if your checkout isn't "kikubot".
+      - COMPOSE_PROJECT_NAME=${KIKUBOT_COMPOSE_PROJECT:-kikubot}
+    volumes:
+      # The whole project root, read-write: the configurator edits configs/,
+      # services/dms/ and regenerates docker-compose.yml, and reads
+      # internal/tools source to build the tool picker.
+      - .:/kikubot
+      # Lets the live-reload signal reach the running agents. Without it, saves
+      # still land on disk and agents pick them up on their ~30s poll, but each
+      # save's flash message reports the signal failure.
+      - /var/run/docker.sock:/var/run/docker.sock

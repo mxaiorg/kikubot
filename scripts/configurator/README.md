@@ -33,3 +33,17 @@ go run ./scripts/configurator                          # serves on 127.0.0.1:500
 go run ./scripts/configurator -port 50042 -addr 0.0.0.0  # bind externally
 go run ./scripts/configurator -root /path/to/kikubot   # different deployment
 ```
+
+#### In Docker
+
+To run it without a local Go toolchain, use `docker-compose-configurator.yml` from the project root:
+
+```bash
+docker compose -f docker-compose-configurator.yml up -d --build   # http://127.0.0.1:50042
+docker compose -f docker-compose-configurator.yml down
+```
+
+It bind-mounts the project root read-write and the host's `/var/run/docker.sock`, so the post-save `SIGHUP` still reaches the agents. The port is published on the host's loopback only, because the dashboard has no auth and the socket is root-equivalent. Use an SSH tunnel for remote access. It runs under its own compose project (`kikubot-configurator`), so the agents' `docker compose up` won't flag it as an orphan. Two variables tune it:
+
+- `CONFIGURATOR_PORT`: host port (default `50042`).
+- `KIKUBOT_COMPOSE_PROJECT`: the agents' compose project name, which is the name of the directory you run them from (default `kikubot`). Set it if your checkout is named differently, or the reload signal won't find the agent containers.

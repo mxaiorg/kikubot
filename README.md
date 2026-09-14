@@ -129,6 +129,10 @@ A dashboard configuration tool can be found in the scripts directory. It's a web
 go mod tidy
 go run ./scripts/configurator  # serves on 127.0.0.1:50042
 ```
+Or, without a Go toolchain:
+```bash
+docker compose -f docker-compose-configurator.yml up -d --build  # same URL
+```
 <img src="assets/Configurator.png" alt="kikubot" width="800">
 
 ### Run your bots
