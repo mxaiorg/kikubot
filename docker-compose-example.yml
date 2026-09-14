@@ -13,6 +13,8 @@ services:
     environment:
       - RUNNING_IN_CONTAINER=true
       - AGENT_EMAIL=kiku@agents.example.com
+      - AGENTS_CONFIG=/app/configs/agents.yaml
+      - MCP_SERVERS_CONFIG=/app/configs/mcp_servers.yaml
 #      - DEBUG_ANTHROPIC_REQUEST=1
     restart: unless-stopped
     extra_hosts:
@@ -25,9 +27,11 @@ services:
       - ./configs/knowledge:/app/knowledge:ro
       # Likewise the roster and the remote-MCP catalog: tool assignments
       # (agents.yaml tools:) and MCP server rows hot-reload too. Other
-      # agents.yaml fields (model, prompt, ACL) still need a restart.
-      - ./configs/agents.yaml:/app/agents.yaml:ro
-      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
+      # agents.yaml fields (model, prompt, ACL) still need a restart. Mount the
+      # directory, not the two files: a single-file bind mount pins the inode
+      # it started with, so a file replaced on the host (write-temp-then-rename)
+      # would never be seen by the running container.
+      - ./configs:/app/configs:ro
 
 #  beta:
 #    build: .
@@ -36,6 +40,8 @@ services:
 #    environment:
 #      - RUNNING_IN_CONTAINER=true
 #      - AGENT_EMAIL=beta@agents.example.com
+#      - AGENTS_CONFIG=/app/configs/agents.yaml
+#      - MCP_SERVERS_CONFIG=/app/configs/mcp_servers.yaml
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
@@ -43,8 +49,7 @@ services:
 #    volumes:
 #      - ./data/beta:/app/data
 #      - ./configs/knowledge:/app/knowledge:ro
-#      - ./configs/agents.yaml:/app/agents.yaml:ro
-#      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
+#      - ./configs:/app/configs:ro
 #
 #  gamma:
 #    build: .
@@ -53,6 +58,8 @@ services:
 #    environment:
 #      - RUNNING_IN_CONTAINER=true
 #      - AGENT_EMAIL=gamma@agents.example.com
+#      - AGENTS_CONFIG=/app/configs/agents.yaml
+#      - MCP_SERVERS_CONFIG=/app/configs/mcp_servers.yaml
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
@@ -60,8 +67,7 @@ services:
 #    volumes:
 #      - ./data/gamma:/app/data
 #      - ./configs/knowledge:/app/knowledge:ro
-#      - ./configs/agents.yaml:/app/agents.yaml:ro
-#      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
+#      - ./configs:/app/configs:ro
 #
 #  delta:
 #    build: .
@@ -70,6 +76,8 @@ services:
 #    environment:
 #      - RUNNING_IN_CONTAINER=true
 #      - AGENT_EMAIL=delta@agents.example.com
+#      - AGENTS_CONFIG=/app/configs/agents.yaml
+#      - MCP_SERVERS_CONFIG=/app/configs/mcp_servers.yaml
 #    restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
@@ -77,5 +85,4 @@ services:
 #    volumes:
 #      - ./data/delta:/app/data
 #      - ./configs/knowledge:/app/knowledge:ro
-#      - ./configs/agents.yaml:/app/agents.yaml:ro
-#      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro
+#      - ./configs:/app/configs:ro

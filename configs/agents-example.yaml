@@ -37,6 +37,14 @@ common:
   # so it only fires for genuinely stuck threads, well after any normal reply.
   waiting_watchdog_minutes: 0
 
+  # Extra pre-existing Docker networks the configurator's generated
+  # docker-compose.yml attaches every agent to (besides the project default).
+  # Use it to reach sidecar MCP containers by name instead of publishing their
+  # ports — e.g. web_agent's Playwright MCPs live on "web-agent", so an
+  # mcp_servers.yaml row can use url: http://pwmcp-<site>:<port>/mcp.
+  # Re-save an agent in the configurator, then `docker compose up -d`.
+  # docker_networks: [web-agent]
+
   system_prompt: |
     You are a helpful agent that serves two groups — users and coworkers. Your role is to resolve tasks submitted by users, drawing on your coworkers below as needed.
     {{coworkers}}

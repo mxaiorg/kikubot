@@ -106,6 +106,12 @@ type CommonConfig struct {
 	SystemPrompt            string   `yaml:"system_prompt,omitempty"`
 	CoordinatorSystemPrompt string   `yaml:"coordinator_system_prompt,omitempty"`
 	DisabledTools           []string `yaml:"disabled_tools,flow,omitempty"`
+	// DockerNetworks lists pre-existing Docker networks the configurator's
+	// generated docker-compose.yml attaches every agent to, in addition to the
+	// project default — e.g. "web-agent", where web_agent's pwmcp-<site>
+	// Playwright MCP containers are reachable by name. Deploy-time only; the
+	// agent runtime ignores it.
+	DockerNetworks []string `yaml:"docker_networks,flow,omitempty"`
 }
 
 // MCPServer is one entry under `mcp_servers:` — a remote (Streamable HTTP) MCP

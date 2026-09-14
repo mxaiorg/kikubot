@@ -59,13 +59,23 @@ var (
 // edited keys — important because local stdio MCP bridges (salesforce_mcp,
 // box_cli, …) spawn a long-lived subprocess per factory call, and a remote
 // bridge does a tools/list round-trip.
+//
+// A remote-MCP key that yields no tools (server down or unreachable, missing
+// credentials) is deliberately NOT cached: caching the empty result would pin
+// it until the config file changed, so an MCP server that was down when the
+// agent started stayed missing until a restart. Instead mcpRetryAt schedules a
+// re-assembly every mcpRetryInterval until the key comes back.
 var (
 	toolsReloadMu    sync.Mutex
 	agentsCfgModTime time.Time
 	mcpCfgModTime    time.Time
 	coreToolsCache   []tools.ToolDefinition
 	toolCache        = map[string]cachedTools{}
+	mcpRetryAt       time.Time // zero = no remote MCP key pending a retry
 )
+
+// mcpRetryInterval is how often a remote MCP that yielded no tools is retried.
+const mcpRetryInterval = 2 * time.Minute
 
 type cachedTools struct {
 	sig  string
@@ -935,12 +945,14 @@ func initAgent() {
 // its `tools:` list, deduplicated by name and filtered by disabled_tools.
 // Results are memoised per key in toolCache (see its doc); mcpServers supplies
 // the signature for remote-MCP keys so an edited row invalidates its entry.
+// A remote key that yields no tools is left uncached and (re)arms mcpRetryAt.
 // Caller must hold toolsReloadMu.
 func buildAgentTools(cfg *config.AgentsConfig, mcpServers []config.MCPServer) []tools.ToolDefinition {
 	if coreToolsCache == nil {
 		coreToolsCache = tools.CoreTools()
 	}
 	agentTools := append([]tools.ToolDefinition(nil), coreToolsCache...)
+	mcpRetryAt = time.Time{}
 
 	mcpSig := make(map[string]string, len(mcpServers))
 	for _, srv := range mcpServers {
@@ -965,6 +977,15 @@ func buildAgentTools(cfg *config.AgentsConfig, mcpServers []config.MCPServer) []
 				if !ok {
 					log.Printf("warning: unknown tool key %q for %s", key, config.AgentEmail)
 					delete(toolCache, key)
+					continue
+				}
+				if sig != "" && len(t) == 0 {
+					// Remote MCP yielded nothing (the bridge logged why). Don't pin
+					// the empty result in the cache — retry on a timer instead.
+					delete(toolCache, key)
+					if mcpRetryAt.IsZero() {
+						mcpRetryAt = time.Now().Add(mcpRetryInterval)
+					}
 					continue
 				}
 				toolCache[key] = cachedTools{sig: sig, defs: t}
@@ -1002,16 +1023,22 @@ func configModTimes() (agentsMT, mcpMT time.Time) {
 }
 
 // reloadToolsIfChanged re-assembles the agent's tool set when agents.yaml or
-// mcp_servers.yaml changed since the last load. Cheap to call every poll: two
-// stats unless something moved.
+// mcp_servers.yaml changed since the last load, or when a remote MCP that
+// yielded no tools is due for a retry (mcpRetryAt). Cheap to call every poll:
+// two stats unless something moved.
 func reloadToolsIfChanged() {
 	toolsReloadMu.Lock()
 	defer toolsReloadMu.Unlock()
 	agentsMT, mcpMT := configModTimes()
-	if !agentsMT.After(agentsCfgModTime) && !mcpMT.After(mcpCfgModTime) {
-		return
+	switch {
+	case agentsMT.After(agentsCfgModTime) || mcpMT.After(mcpCfgModTime):
+		reloadTools("config change")
+	case !mcpRetryAt.IsZero() && !time.Now().Before(mcpRetryAt):
+		// Push the next attempt out first: if reloadTools bails on a parse
+		// error it never reaches buildAgentTools to reschedule.
+		mcpRetryAt = time.Now().Add(mcpRetryInterval)
+		reloadTools("MCP retry")
 	}
-	reloadTools("config change")
 }
 
 // forceReloadTools unconditionally re-assembles the tool set. Wired to SIGHUP

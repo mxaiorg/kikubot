@@ -64,8 +64,9 @@ func saveMCPServers(root string, servers []config.MCPServer) error {
 }
 
 // ensureMCPServersFile creates an empty catalog when none exists. The generated
-// docker-compose.yml bind-mounts the file into each container; if the host side
-// were missing, Docker would create a directory in its place instead.
+// docker-compose.yml now mounts the whole configs/ directory, but older
+// generated files bind-mount this file directly; if the host side were missing,
+// Docker would create a directory in its place instead.
 func ensureMCPServersFile(root string) error {
 	_, err := os.Stat(mcpServersPath(root))
 	if err == nil || !errors.Is(err, fs.ErrNotExist) {

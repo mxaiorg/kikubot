@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -88,6 +89,35 @@ func composeServices(root string) ([]composeService, error) {
 	return svcs, nil
 }
 
+// dockerNetworkName matches Docker's rule for network names.
+var dockerNetworkName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// composeNetworks returns common.docker_networks from agents.yaml: extra
+// pre-existing Docker networks every agent joins (e.g. "web-agent", where the
+// pwmcp-<site> Playwright MCP containers live). Blank and duplicate entries and
+// "default" are dropped; an invalid name is an error rather than being emitted
+// into the YAML.
+func composeNetworks(root string) ([]string, error) {
+	r, err := loadRoster(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	seen := map[string]bool{"default": true}
+	for _, n := range r.Common.DockerNetworks {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[n] {
+			continue
+		}
+		if !dockerNetworkName.MatchString(n) {
+			return nil, fmt.Errorf("common.docker_networks: invalid network name %q", n)
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return out, nil
+}
+
 // regenerateCompose writes docker-compose.yml with one service per agent
 // currently in configs/agents.yaml. Each service shares the same
 // configs/secrets.env env_file (so credentials are loaded once) and is
@@ -98,12 +128,17 @@ func regenerateCompose(root string) error {
 	if err != nil {
 		return err
 	}
-	// The catalog is bind-mounted below; make sure the host side is a file,
-	// otherwise Docker would create a directory at that path.
+	// Keep a (possibly empty) catalog on disk. Compose files generated before
+	// configs/ was mounted as a directory bind-mount the file itself, and a
+	// missing host side would make Docker create a directory in its place.
 	if err := ensureMCPServersFile(root); err != nil {
 		return err
 	}
 	emailHost := emailServerHost(root)
+	networks, err := composeNetworks(root)
+	if err != nil {
+		return err
+	}
 
 	var b strings.Builder
 	b.WriteString("services:\n")
@@ -118,6 +153,9 @@ func regenerateCompose(root string) error {
 		b.WriteString("    environment:\n")
 		b.WriteString("      - RUNNING_IN_CONTAINER=true\n")
 		fmt.Fprintf(&b, "      - AGENT_EMAIL=%s\n", s.Email)
+		// Point the agent at the configs/ directory mount below.
+		b.WriteString("      - AGENTS_CONFIG=/app/configs/agents.yaml\n")
+		b.WriteString("      - MCP_SERVERS_CONFIG=/app/configs/mcp_servers.yaml\n")
 		b.WriteString("    restart: unless-stopped\n")
 		b.WriteString("    extra_hosts:\n")
 		b.WriteString("      - \"host.docker.internal:host-gateway\"\n")
@@ -132,9 +170,29 @@ func regenerateCompose(root string) error {
 		// hot-reloads its tool set when either file changes (poll + SIGHUP),
 		// so assigning a tool or editing an MCP server needs no rebuild.
 		// Other agents.yaml fields (model, prompt, ACL) are still read only
-		// at startup.
-		b.WriteString("      - ./configs/agents.yaml:/app/agents.yaml:ro\n")
-		b.WriteString("      - ./configs/mcp_servers.yaml:/app/mcp_servers.yaml:ro\n")
+		// at startup. Mount the configs/ directory rather than the two files:
+		// a single-file bind mount pins the inode it started with, so a host
+		// file that gets replaced (write-temp-then-rename, restore, cp over
+		// a deleted file) is never seen by the running container.
+		b.WriteString("      - ./configs:/app/configs:ro\n")
+		// Join the extra networks as well as the project default, so the agent
+		// reaches sidecar MCP containers by name (http://pwmcp-<site>:<port>/mcp)
+		// without their ports being published on the host.
+		if len(networks) > 0 {
+			b.WriteString("    networks:\n")
+			b.WriteString("      - default\n")
+			for _, n := range networks {
+				fmt.Fprintf(&b, "      - %s\n", n)
+			}
+		}
+	}
+	if len(networks) > 0 {
+		// External: compose attaches to the existing network and never creates
+		// or removes it (web_agent's mcp.sh owns web-agent).
+		b.WriteString("\nnetworks:\n")
+		for _, n := range networks {
+			fmt.Fprintf(&b, "  %s:\n    external: true\n", n)
+		}
 	}
 
 	return fsWriteError(composePath(root), os.WriteFile(composePath(root), []byte(b.String()), 0o644))
