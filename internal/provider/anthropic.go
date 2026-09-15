@@ -18,6 +18,13 @@ type AnthropicProvider struct {
 	client anthropic.Client
 }
 
+// anthropicRetryBackoff is how long CreateMessage waits before retrying a
+// retryable (overloaded / rate-limited) attempt: 1s, 2s, 4s… A variable so
+// tests can retry without sleeping.
+var anthropicRetryBackoff = func(attempt int) time.Duration {
+	return time.Duration(1<<attempt) * time.Second
+}
+
 func NewAnthropicProvider() *AnthropicProvider {
 	return &AnthropicProvider{
 		client: anthropic.NewClient(), // reads ANTHROPIC_API_KEY from env
@@ -79,6 +86,10 @@ func (p *AnthropicProvider) CreateMessage(ctx context.Context, params MessagePar
 	var err error
 	maxRetries := 3
 	for attempt := range maxRetries {
+		// Each attempt starts clean. The error used to carry over from a
+		// failed attempt, so the next one skipped reading its stream and
+		// "failed" with the stale error — no retry could ever succeed.
+		err = nil
 		stream := p.client.Messages.NewStreaming(ctx, sdkParams)
 		acc := &streamAccumulator{}
 		for stream.Next() {
@@ -96,18 +107,18 @@ func (p *AnthropicProvider) CreateMessage(ctx context.Context, params MessagePar
 			break
 		}
 		errStr := err.Error()
-		if strings.Contains(errStr, "529") || strings.Contains(errStr, "429") || strings.Contains(errStr, "overloaded") {
-			backoff := time.Duration(1<<attempt) * time.Second
-			log.Printf("  ⏳ retryable API error (attempt %d/%d), retrying in %v: %v",
-				attempt+1, maxRetries, backoff, err)
-			select {
-			case <-time.After(backoff):
-				continue
-			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during retry backoff: %w", ctx.Err())
-			}
+		retryable := strings.Contains(errStr, "529") || strings.Contains(errStr, "429") || strings.Contains(errStr, "overloaded")
+		if !retryable || attempt == maxRetries-1 {
+			break // non-retryable, or out of attempts: don't sleep before giving up
 		}
-		break // non-retryable error
+		backoff := anthropicRetryBackoff(attempt)
+		log.Printf("  ⏳ retryable API error (attempt %d/%d), retrying in %v: %v",
+			attempt+1, maxRetries, backoff, err)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled during retry backoff: %w", ctx.Err())
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("anthropic api call failed: %w", err)
