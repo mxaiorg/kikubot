@@ -425,6 +425,9 @@ func (a *Agent) HandleSnooze(ctx context.Context, snooze services.Snooze, maxTur
 
 	replay := emails[0]
 	replay.Content = snoozeReplayContent(snooze, replay, time.Now())
+	if snooze.Watchdog {
+		ctx = services.WithWatchdogNudge(ctx)
+	}
 	handleErr := a.handleMessageWith(ctx, preSys, &replay, maxTurns, reduced, indexTools(reduced))
 	if handleErr != nil {
 		log.Printf("error handling message: %s", handleErr)

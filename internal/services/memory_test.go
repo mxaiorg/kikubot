@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // blockTypes returns the "type" of each content block in a sanitized message,
@@ -145,4 +146,32 @@ func TestStripUnusableThinking(t *testing.T) {
 			t.Errorf("expected byte-identical passthrough, got %s", got)
 		}
 	})
+}
+
+// TestMemoryStatusSince: a status counts only if it was stamped at or after
+// the run's start. A thread closed by an earlier run still reads complete, and
+// treating that as "this run delivered" suppressed the max-turns notice for a
+// run that produced nothing.
+func TestMemoryStatusSince(t *testing.T) {
+	start := time.Now()
+	before := start.Add(-24 * time.Hour)
+	after := start.Add(time.Second)
+
+	cases := []struct {
+		name string
+		mem  *Memory
+		want MemoryStatus
+	}{
+		{"nil memory", nil, ""},
+		{"no status", &Memory{}, ""},
+		{"complete from an earlier run", &Memory{Status: MemoryStatus_Complete, StatusUpdated: &before}, ""},
+		{"complete this run", &Memory{Status: MemoryStatus_Complete, StatusUpdated: &after}, MemoryStatus_Complete},
+		{"complete with no timestamp", &Memory{Status: MemoryStatus_Complete}, ""},
+		{"waiting this run", &Memory{Status: MemoryStatus_Waiting, StatusUpdated: &after}, MemoryStatus_Waiting},
+	}
+	for _, tc := range cases {
+		if got := tc.mem.StatusSince(start); got != tc.want {
+			t.Errorf("%s: StatusSince = %q, want %q", tc.name, got, tc.want)
+		}
+	}
 }

@@ -600,6 +600,18 @@ func (p *Memory) ClearStatus() {
 	p.StatusUpdated = nil
 }
 
+// StatusSince returns the thread's status if it was set at or after t, and ""
+// otherwise. A thread's status outlives the run that set it, so a bare Status
+// check can't tell "this run marked it complete" from "an earlier run did": a
+// recurring thread, or a delegate re-asked on a thread it closed yesterday,
+// still reads complete before the new run has done anything.
+func (p *Memory) StatusSince(t time.Time) MemoryStatus {
+	if p == nil || p.StatusUpdated == nil || p.StatusUpdated.Before(t) {
+		return ""
+	}
+	return p.Status
+}
+
 func (p *Memory) SaveMemory() error {
 	return writeMemoryFile(p)
 }

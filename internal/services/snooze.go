@@ -29,7 +29,9 @@ type Snooze struct {
 	// a user/scheduled snooze. Watchdog entries are armed automatically when an
 	// agent sets status=waiting and fire only if the thread is still waiting at
 	// the deadline (see ArmWaitingWatchdog and the watchdog branch in the poll
-	// loop). They are handled separately from ordinary snoozes.
+	// loop). They are handled separately from ordinary snoozes, and a thread
+	// can hold one of each kind at once: a scheduled run that delegates and
+	// waits shares its thread and Message-Id with the watchdog it arms.
 	Watchdog bool `json:"watchdog,omitempty"`
 	// Fires counts how many times this watchdog has already nudged the
 	// coordinator. Capped in the poll loop so a permanently-dead delegate
@@ -89,44 +91,100 @@ var snoozeFile = "snooze.json"
 // trusted source, so no IMAP round-trip is needed here). The deadline is
 // now + minutes.
 //
-// It deliberately does NOT clobber a pre-existing *non-watchdog* snooze on the
-// same thread (a real scheduled/recurring task) — that snooze will re-trigger
-// processing on its own, so the watchdog stands down. Refreshing an existing
-// watchdog resets its Fires counter to zero, because reaching this point means
-// the agent just made progress (it delivered a message this turn).
+// It is armed even when a real scheduled task lives on the same thread, and
+// the two entries coexist (DeleteSnooze only touches entries of its own kind).
+// Standing down in favour of the schedule left a daily run that delegated and
+// never heard back parked as waiting until the next day's tick — which replays
+// the task from scratch rather than following up. A frequent schedule doesn't
+// double up: each run that waits again re-arms (pushing the deadline out), and
+// a run that finishes makes the watchdog stand down when it fires. Refreshing
+// an existing watchdog resets its Fires counter to zero, because reaching this
+// point means the agent just made progress (it delivered a message this turn)
+// — except during a watchdog's own nudge (WithWatchdogNudge): the follow-up it
+// provokes is not progress, and resetting there meant a delegate that never
+// answers got a follow-up every deadline and the give-up cap never tripped.
 func ArmWaitingWatchdog(ctx context.Context, messageId, threadId string, minutes int) error {
 	if minutes <= 0 || strings.TrimSpace(messageId) == "" || strings.TrimSpace(threadId) == "" {
 		return nil
 	}
-	if existing, ferr := FindSnoozeByThread(threadId); ferr == nil && existing != nil && !existing.Watchdog {
-		// A genuine scheduled snooze owns this thread; leave it alone.
-		return nil
+	fires := 0
+	if isWatchdogNudge(ctx) {
+		if existing, ferr := FindWatchdogByThread(threadId); ferr == nil && existing != nil {
+			fires = existing.Fires
+		}
 	}
 	s := &Snooze{
 		ThreadId:    threadId,
 		MessageId:   messageId,
 		Once:        true,
 		Watchdog:    true,
-		Fires:       0,
+		Fires:       fires,
 		UnSnooze:    time.Now().Add(time.Duration(minutes) * time.Minute),
 		Description: "watchdog: still awaiting a reply on this delegated task",
 	}
 	return s.SaveSnooze(ctx)
 }
 
-// FindSnoozeByThread returns the snooze entry for a given thread root ID,
-// or nil if none exists.
+type watchdogNudgeKey struct{}
+
+// WithWatchdogNudge marks ctx as a stuck-task watchdog's nudge turn, so a
+// follow-up sent during it re-arms the watchdog without resetting its nudge
+// count (see ArmWaitingWatchdog).
+func WithWatchdogNudge(ctx context.Context) context.Context {
+	return context.WithValue(ctx, watchdogNudgeKey{}, true)
+}
+
+func isWatchdogNudge(ctx context.Context) bool {
+	nudge, _ := ctx.Value(watchdogNudgeKey{}).(bool)
+	return nudge
+}
+
+// FindSnoozeByThread returns the scheduled task (the non-watchdog entry) for a
+// given thread root ID, or nil if none exists.
 func FindSnoozeByThread(threadId string) (*Snooze, error) {
+	return findSnoozeByThread(threadId, false)
+}
+
+// FindWatchdogByThread returns the stuck-task watchdog for a given thread root
+// ID, or nil if none is armed.
+func FindWatchdogByThread(threadId string) (*Snooze, error) {
+	return findSnoozeByThread(threadId, true)
+}
+
+func findSnoozeByThread(threadId string, watchdog bool) (*Snooze, error) {
 	snoozed, err := ReadSnoozeFile()
 	if err != nil {
 		return nil, err
 	}
 	for i, s := range snoozed {
-		if s.ThreadId == threadId {
+		if s.ThreadId == threadId && s.Watchdog == watchdog {
 			return &snoozed[i], nil
 		}
 	}
 	return nil, nil
+}
+
+// AbortThreadSnoozes clears what is pending on a thread whose task has been
+// aborted: its watchdog and any one-shot scheduled run. A recurring schedule
+// is kept — an aborted run is one failed occurrence, not a request to stop the
+// schedule, and deleting it turned a single delegate failure (a bounce, or a
+// coworker's max-turns notice) into a daily task that silently never ran again.
+func AbortThreadSnoozes(threadId string) (int, error) {
+	snoozed, err := ReadSnoozeFile()
+	if err != nil {
+		return 0, err
+	}
+	var filtered []Snooze
+	for _, entry := range snoozed {
+		if entry.ThreadId != threadId || (!entry.Watchdog && !entry.Once) {
+			filtered = append(filtered, entry)
+		}
+	}
+	removed := len(snoozed) - len(filtered)
+	if removed == 0 {
+		return 0, nil
+	}
+	return removed, SaveSnoozeFile(filtered)
 }
 
 func (s *Snooze) SaveSnooze(ctx context.Context) error {
@@ -139,7 +197,8 @@ func (s *Snooze) SaveSnooze(ctx context.Context) error {
 	}
 
 	// Delete any existing entry if it exists
-	// NOTE: THIS MEANS THAT ONLY ONE SNOOZE ENTRY CAN EXIST PER MESSAGE THREAD
+	// NOTE: THIS MEANS THAT ONLY ONE SNOOZE ENTRY OF EACH KIND (scheduled task /
+	// watchdog) CAN EXIST PER MESSAGE THREAD
 	delErr := s.DeleteSnooze()
 	if delErr != nil {
 		return fmt.Errorf("deleting existing snooze entry: %w", delErr)
@@ -160,6 +219,11 @@ func (s *Snooze) SaveSnooze(ctx context.Context) error {
 // DeleteSnooze deletes a snooze entry from the snoozeFile.
 // If both MessageId and ThreadId are provided, only the entry with
 // the matching MessageId is removed.
+//
+// Only entries of the same kind as s (scheduled task vs watchdog) are matched.
+// A scheduled run's watchdog carries the same thread and Message-Id as the
+// schedule itself, so without this, advancing the schedule would delete the
+// watchdog and a watchdog standing down would delete the schedule.
 func (s *Snooze) DeleteSnooze() error {
 	snoozed, err := ReadSnoozeFile()
 	if err != nil {
@@ -169,7 +233,7 @@ func (s *Snooze) DeleteSnooze() error {
 	// First try to remove by MessageId
 	var filtered []Snooze
 	for _, entry := range snoozed {
-		if s.MessageId != "" && entry.MessageId == s.MessageId {
+		if entry.Watchdog == s.Watchdog && s.MessageId != "" && entry.MessageId == s.MessageId {
 			continue
 		}
 		filtered = append(filtered, entry)
@@ -179,7 +243,7 @@ func (s *Snooze) DeleteSnooze() error {
 	if len(filtered) == len(snoozed) && s.ThreadId != "" {
 		filtered = nil
 		for _, entry := range snoozed {
-			if entry.ThreadId == s.ThreadId {
+			if entry.Watchdog == s.Watchdog && entry.ThreadId == s.ThreadId {
 				continue
 			}
 			filtered = append(filtered, entry)

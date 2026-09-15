@@ -80,37 +80,9 @@ func (p *AnthropicProvider) CreateMessage(ctx context.Context, params MessagePar
 	maxRetries := 3
 	for attempt := range maxRetries {
 		stream := p.client.Messages.NewStreaming(ctx, sdkParams)
-		acc := &anthropic.Message{}
-		originalRaw = originalRaw[:0]
-		marshalWarned := false
+		acc := &streamAccumulator{}
 		for stream.Next() {
-			event := stream.Current()
-			// Snapshot the block's raw JSON as it arrives. Accumulate will
-			// later overwrite JSON.raw in the stop event.
-			if start, ok := event.AsAny().(anthropic.ContentBlockStartEvent); ok {
-				originalRaw = append(originalRaw, start.ContentBlock.RawJSON())
-			}
-			if accErr := acc.Accumulate(event); accErr != nil {
-				// The SDK re-marshals the accumulated message/block on each stop
-				// event to refresh JSON.raw. When the model truncates a tool_use
-				// input mid-stream (classically from inlining a large payload
-				// into tool args and hitting the output limit), that field is
-				// left as incomplete JSON and json.RawMessage's MarshalJSON
-				// aborts with "unexpected end of JSON input" — killing an
-				// otherwise-usable response and wedging the thread on retry.
-				// The content blocks are already accumulated on `acc` (the stop
-				// handler only fails to refresh JSON.raw, which we override
-				// downstream anyway), so treat this as non-fatal: keep reading so
-				// the full response — including the invalid tool input — reaches
-				// the agent loop, where sanitizeTruncatedToolInputs turns it into
-				// "your input was truncated, resend as an attachment" guidance.
-				if isAccumulateMarshalError(accErr) {
-					if !marshalWarned {
-						log.Printf("  ⚠️  accumulate marshal error (truncated tool input?), recovering from accumulated blocks: %v", accErr)
-						marshalWarned = true
-					}
-					continue
-				}
+			if accErr := acc.add(stream.Current()); accErr != nil {
 				err = fmt.Errorf("stream accumulate error: %w", accErr)
 				break
 			}
@@ -119,7 +91,8 @@ func (p *AnthropicProvider) CreateMessage(ctx context.Context, params MessagePar
 			err = stream.Err()
 		}
 		if err == nil {
-			resp = acc
+			resp = acc.message()
+			originalRaw = acc.originalRaw
 			break
 		}
 		errStr := err.Error()
@@ -300,20 +273,57 @@ func (p *AnthropicProvider) NewToolResult(toolUseID, content string, isError boo
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-// isAccumulateMarshalError reports whether an error from Message.Accumulate is
-// the SDK's stop-event re-marshal failure (it rebuilds JSON.raw via json.Marshal
-// on each content_block_stop / message_stop). The only field that breaks this is
-// an incomplete json.RawMessage — a tool_use input the model truncated
-// mid-stream. The accumulated content blocks are intact on the Message; only the
-// JSON.raw refresh failed, which the caller overrides anyway, so this class of
-// error is recoverable rather than fatal.
-func isAccumulateMarshalError(err error) bool {
-	if err == nil {
-		return false
+// streamAccumulator folds streamed events into an anthropic.Message via the
+// SDK's Accumulate, keeping two things Accumulate discards:
+//
+//   - each content block's raw JSON as sent in content_block_start
+//     (originalRaw; see CreateMessage), and
+//   - each tool_use block's input exactly as streamed.
+//
+// When the model truncates a tool_use input mid-stream (classically from
+// inlining a large payload into tool args and hitting the output limit), the
+// streamed input is incomplete JSON. Since anthropic-sdk-go v1.70 the stop
+// events quietly replace such an input with `{}` so the block re-marshals
+// (older versions failed Accumulate with a marshal error instead). A `{}` is
+// valid JSON, so the agent loop's sanitizeTruncatedToolInputs could no longer
+// tell the call was cut off: it executed the tool with empty arguments instead
+// of telling the model its input was truncated and to resend the payload as an
+// attachment. message() puts the truncated input back.
+type streamAccumulator struct {
+	msg         anthropic.Message
+	originalRaw []string
+	toolInput   map[int64][]byte // streamed input_json_delta bytes, by block index
+}
+
+func (s *streamAccumulator) add(event anthropic.MessageStreamEventUnion) error {
+	// Snapshot the block's raw JSON as it arrives. Accumulate will later
+	// overwrite JSON.raw in the stop event.
+	if start, ok := event.AsAny().(anthropic.ContentBlockStartEvent); ok {
+		s.originalRaw = append(s.originalRaw, start.ContentBlock.RawJSON())
 	}
-	s := err.Error()
-	return strings.Contains(s, "error converting accumulated message to JSON") ||
-		strings.Contains(s, "error converting content block to JSON")
+	if event.Type == "content_block_delta" && event.Delta.Type == "input_json_delta" && event.Delta.PartialJSON != "" {
+		if s.toolInput == nil {
+			s.toolInput = map[int64][]byte{}
+		}
+		s.toolInput[event.Index] = append(s.toolInput[event.Index], event.Delta.PartialJSON...)
+	}
+	return s.msg.Accumulate(event)
+}
+
+// message returns the accumulated message with every truncated tool_use input
+// restored to the invalid bytes the model actually streamed. Only client
+// tool_use blocks are restored: they are what sanitizeTruncatedToolInputs
+// inspects (and replaces with `{}` before the block reaches history), whereas a
+// server_tool_use input goes into history as-is and must stay valid JSON.
+func (s *streamAccumulator) message() *anthropic.Message {
+	for i := range s.msg.Content {
+		block := &s.msg.Content[i]
+		streamed := s.toolInput[int64(i)]
+		if block.Type == "tool_use" && len(streamed) > 0 && !json.Valid(streamed) {
+			block.Input = json.RawMessage(streamed)
+		}
+	}
+	return &s.msg
 }
 
 // needsOriginalRaw reports whether a block type must keep its pre-accumulate

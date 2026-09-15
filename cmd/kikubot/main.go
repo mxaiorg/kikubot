@@ -264,7 +264,8 @@ func process(parent context.Context) {
 		}
 		if snoozeErr != nil {
 			// Max-turns is not retryable — re-firing every poll would burn a
-			// fresh budget each time. Advance to the next tick instead.
+			// fresh budget each time. Advance to the next tick instead
+			// (runSnooze has already notified the requester).
 			log.Println("snooze hit max turns; advancing instead of retrying:", snooze.MessageId)
 		}
 		// Only advance/delete after execution (or a non-retryable failure)
@@ -299,6 +300,7 @@ func runSnooze(parent context.Context, snooze *services.Snooze) error {
 	}
 
 	timeout := time.Duration(config.AgentTimeout) * time.Second
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	hErr := agent.HandleSnooze(ctx, *snooze, config.MaxTurns)
 	cancel()
@@ -306,7 +308,67 @@ func runSnooze(parent context.Context, snooze *services.Snooze) error {
 	if sErr := services.SaveMemoryHistory(parent, agents.StripAttachmentBlobs(agent.History()), snooze.MessageId); sErr != nil {
 		log.Printf("snooze: error saving history for %s: %s", threadId, sErr)
 	}
+	if errors.Is(hErr, agents.ErrMaxTurns) {
+		notifySnoozeMaxTurns(parent, snooze, threadId, started)
+	}
 	return hErr
+}
+
+// maxTurnsNoticeUnneeded returns why a run that exhausted its turn budget needs
+// no failure notice, or "" when it does. Two outcomes of this run make the
+// notice wrong: it marked the task complete (the answer already went out), or
+// it parked the task waiting with a watchdog armed — the awaited reply or the
+// watchdog resumes it, and the watchdog notifies the requester itself if it
+// gives up. Burning the rest of the budget after delegating (re-polling the
+// mailbox, re-setting waiting) is a common model failure; a notice then tells
+// the requester the task failed while it is still in flight, and to a coworker
+// it arrives as an auto-reply that aborts its side of the thread. A status left
+// over from an earlier run doesn't count.
+func maxTurnsNoticeUnneeded(mem *services.Memory, threadRoot string, started time.Time) string {
+	switch mem.StatusSince(started) {
+	case services.MemoryStatus_Complete:
+		return "the task is already marked complete"
+	case services.MemoryStatus_Waiting:
+		if wd, err := services.FindWatchdogByThread(threadRoot); err == nil && wd != nil {
+			return "the task is waiting with a watchdog armed"
+		}
+	}
+	return ""
+}
+
+// notifySnoozeMaxTurns tells a scheduled task's requester that this run
+// exhausted its turn budget, as the inbound-email path does for a live request.
+// Without it a failed run just advanced to the next tick and the requester
+// never learned that nothing was produced. See maxTurnsNoticeUnneeded for when
+// it stays quiet.
+func notifySnoozeMaxTurns(parent context.Context, snooze *services.Snooze, threadId string, started time.Time) {
+	if mem, memErr := services.GetMemory(threadId); memErr == nil {
+		if why := maxTurnsNoticeUnneeded(mem, threadId, started); why != "" {
+			log.Printf("snooze %s hit max turns but %s — suppressing notice", snooze.MessageId, why)
+			return
+		}
+	}
+	emails, err := services.GetEmails(parent, []string{snooze.MessageId})
+	if err != nil || len(emails) == 0 {
+		log.Printf("snooze %s hit max turns; could not load the scheduled email to notify its sender: %v", snooze.MessageId, err)
+		return
+	}
+	task := snooze.Description
+	if task == "" {
+		task = emails[0].Subject
+	}
+	notice := fmt.Sprintf(
+		"⚠️ Agent %s exhausted its turn budget (%d turns) during the scheduled run of %q and could not complete it. "+
+			"Partial progress has been preserved in the thread history, but no final answer was produced.\n",
+		config.AgentName, config.MaxTurns, task,
+	)
+	if !snooze.Once {
+		notice += "The task is still scheduled and will run again at its next scheduled time.\n"
+	}
+	log.Printf("snooze %s hit max turns — notifying %s", snooze.MessageId, emails[0].From)
+	if bounceErr := services.SendBounce(parent, emails[0], notice); bounceErr != nil {
+		log.Println("error sending scheduled-run max-turns notice:", bounceErr)
+	}
 }
 
 // waitingWatchdogMaxFires bounds how many times a stuck-task watchdog will
@@ -362,8 +424,10 @@ func runWatchdog(parent context.Context, snooze *services.Snooze) {
 
 	// Nudge. Reschedule first (incremented, future deadline) so the entry
 	// survives this turn and won't re-fire this cycle. If the coordinator
-	// re-arms waiting during the nudge, ArmWaitingWatchdog overwrites this with
-	// a fresh Fires=0 entry — progress resets the budget.
+	// follows up and re-arms waiting during the nudge, ArmWaitingWatchdog
+	// pushes the deadline out but keeps this Fires count (HandleSnooze marks
+	// the turn as a nudge) — only a real reply resets the budget, or a dead
+	// delegate would get a follow-up every deadline forever.
 	snooze.Fires++
 	rescheduleWatchdog(parent, snooze)
 
@@ -540,6 +604,7 @@ func processNewEmails(parent context.Context, emails []services.Email, deps poll
 		deps.agent.SetHistory(history)
 		// Need enough time for MCP
 		timeout := time.Duration(config.AgentTimeout) * time.Second
+		started := time.Now()
 		ctx, cancel := context.WithTimeout(parent, timeout)
 		err := deps.agent.HandleMessage(ctx, "", &email, config.MaxTurns)
 		cancel()
@@ -575,12 +640,20 @@ func processNewEmails(parent context.Context, emails []services.Email, deps poll
 				delete(emailRetryCounts, email.MessageId)
 				// If the agent already called set_task_status=complete, the
 				// user has the real answer (typically from report_tool a
-				// turn or two earlier). Suppress the failure notice — it
-				// only confuses recipients who just got a successful reply.
-				if mem, memErr := deps.getMemory(email.GetThreadRoot()); memErr == nil && mem != nil && mem.Status == services.MemoryStatus_Complete {
-					log.Printf("max turns exhausted for email %s but task already marked complete — suppressing notice", email.MessageId)
-					processed = append(processed, email.MessageId)
-					continue
+				// turn or two earlier), and if it parked the task waiting
+				// with a watchdog armed, the task is still in flight.
+				// Suppress the failure notice in both cases — see
+				// maxTurnsNoticeUnneeded. Only a status set during this run
+				// counts: a thread closed by an earlier message still reads
+				// complete, and trusting that silently swallowed the notice
+				// for a delegate that burned its whole budget on a re-asked
+				// task.
+				if mem, memErr := deps.getMemory(email.GetThreadRoot()); memErr == nil {
+					if why := maxTurnsNoticeUnneeded(mem, email.GetThreadRoot(), started); why != "" {
+						log.Printf("max turns exhausted for email %s but %s — suppressing notice", email.MessageId, why)
+						processed = append(processed, email.MessageId)
+						continue
+					}
 				}
 				log.Printf("max turns exhausted for email %s — notifying sender and marking seen", email.MessageId)
 				notice := fmt.Sprintf(
@@ -844,14 +917,13 @@ func handleAutoReply(ctx context.Context, email services.Email) {
 		}
 	}
 
-	// Delete any snooze tied to this thread — the task can't complete.
+	// Clear what's pending on this thread — the task can't complete. A
+	// recurring schedule survives; only this occurrence failed.
 	if rootId != "" {
-		if snooze, err := services.FindSnoozeByThread(rootId); err == nil && snooze != nil {
-			if delErr := snooze.DeleteSnooze(); delErr != nil {
-				log.Println("error deleting snooze for aborted thread:", delErr)
-			} else {
-				log.Printf("cleared pending snooze for thread %s", rootId)
-			}
+		if n, delErr := services.AbortThreadSnoozes(rootId); delErr != nil {
+			log.Println("error deleting snooze for aborted thread:", delErr)
+		} else if n > 0 {
+			log.Printf("cleared %d pending snooze(s) for thread %s", n, rootId)
 		}
 	}
 
